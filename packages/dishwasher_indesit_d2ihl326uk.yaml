@@ -502,13 +502,12 @@ template:
         unique_id: dishwasher_last_started
         default_entity_id: sensor.kitchen_dishwasher_last_started
         device_class: timestamp
-        state: >-
-          {% set value = state_attr('sensor.kitchen_dishwasher_cycle_state', 'last_started_at') %}
-          {{ value if value else none }}
+        state: >
+          {{ state_attr('sensor.kitchen_dishwasher_cycle_state', 'last_started_at') }}
         attributes:
           # Keep the corresponding start-energy snapshot available for
           # diagnostics without creating another standalone entity.
-          start_energy_kwh: >-
+          start_energy_kwh: >
             {{ state_attr('sensor.kitchen_dishwasher_cycle_state',
                           'last_started_energy_kwh') }}
 
@@ -517,9 +516,8 @@ template:
         unique_id: dishwasher_last_finished
         default_entity_id: sensor.kitchen_dishwasher_last_finished
         device_class: timestamp
-        state: >-
-          {% set value = state_attr('sensor.kitchen_dishwasher_cycle_state', 'last_finished_at') %}
-          {{ value if value else none }}
+        state: >
+          {{ state_attr('sensor.kitchen_dishwasher_cycle_state', 'last_finished_at') }}
 
       # Duration of the most recently completed cycle, stored in seconds so HA
       # can treat it as a proper duration sensor and format it appropriately.
@@ -528,9 +526,9 @@ template:
         default_entity_id: sensor.kitchen_dishwasher_last_cycle_duration
         device_class: duration
         unit_of_measurement: s
-        state: >-
-          {% set value = state_attr('sensor.kitchen_dishwasher_cycle_state', 'last_duration_s') %}
-          {{ value if value is not none else none }}
+        state: >
+          {{ state_attr('sensor.kitchen_dishwasher_cycle_state', 'last_duration_s') }}
+
 
       # Energy consumed by the most recently completed cycle.
       - name: Dishwasher last cycle energy
@@ -538,11 +536,8 @@ template:
         default_entity_id: sensor.kitchen_dishwasher_last_cycle_energy
         device_class: energy
         unit_of_measurement: kWh
-        state: >-
-          {% set value = state_attr('sensor.kitchen_dishwasher_cycle_state', 'last_cycle_energy_kwh') %}
-          {{ value if value is not none else none }}
-
-
+        state: >
+          {{ state_attr('sensor.kitchen_dishwasher_cycle_state', 'last_cycle_energy_kwh') }}
 
 # -----------------------------------------------------------------------------
 # FINISH NOTIFICATION
