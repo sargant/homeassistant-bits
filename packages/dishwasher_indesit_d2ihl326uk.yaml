@@ -565,7 +565,7 @@ automation:
         target:
           # Label the desired notify.* entities with "Receive push notifications".
           # This keeps individual phones/devices out of this package.
-          label_id: Receive push notifications
+          label_id: "{{ label_id('Receive push notifications') }}"
         data:
           title: Dishwasher finished
           message: >-
