@@ -550,21 +550,35 @@ template:
 # same state update, so `trigger.to_state` already contains the duration and
 # energy values for the cycle that has just completed.
 automation:
+  - id: dishwasher_started_notification
+    alias: Dishwasher started notification
+    description: Notify labelled push targets when a dishwasher cycle starts.
+    triggers:
+      - trigger: state
+        entity_id: sensor.kitchen_dishwasher_cycle_state
+        from: "Starting"
+        to: "Running"
+    actions:
+      - action: notify.send_message
+        target:
+          label_id: "{{ label_id('Receive push notifications') }}"
+        data:
+          title: Dishwasher started
+          message: >-
+            Started at {{ as_datetime(trigger.to_state.attributes.get('last_started_at'))
+            | as_local | timestamp_custom('%H:%M') }}
+
   - id: dishwasher_finished_notification
     alias: Dishwasher finished notification
     description: Notify labelled push targets when a dishwasher cycle finishes.
-
     triggers:
       - trigger: state
         entity_id: sensor.kitchen_dishwasher_cycle_state
         from: "Finish pending"
         to: "Finished"
-
     actions:
       - action: notify.send_message
         target:
-          # Label the desired notify.* entities with "Receive push notifications".
-          # This keeps individual phones/devices out of this package.
           label_id: "{{ label_id('Receive push notifications') }}"
         data:
           title: Dishwasher finished
