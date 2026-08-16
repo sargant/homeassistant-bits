@@ -12,6 +12,7 @@ boot: auto
 init: false
 hassio_api: true
 hassio_role: homeassistant
+homeassistant_api: true
 map:
   - homeassistant_config:rw
 options:
@@ -20,11 +21,11 @@ options:
   source_path: packages
   destination_path: packages/synced
   interval: 300
-  auto_restart: false
+  after_sync: reload
 schema:
   repository: str
   branch: str
   source_path: str
   destination_path: str
   interval: int
-  auto_restart: bool
+  after_sync: "list(none|reload|restart)"
