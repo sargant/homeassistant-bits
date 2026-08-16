@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cd "$(git rev-parse --show-toplevel)"
-git archive HEAD packages | ssh root@assistant 'tar -xf - -C /config'
+curl -fsSL https://github.com/sargant/homeassistant-bits/archive/refs/heads/main.tar.gz \
+  | ssh root@assistant \
+      'tar -xzf - -C /config/packages --strip-components=2 homeassistant-bits-main/packages'
