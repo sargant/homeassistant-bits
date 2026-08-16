@@ -10,7 +10,7 @@ branch: main
 source_path: packages
 destination_path: packages/synced
 interval: 300
-auto_restart: false
+after_sync: reload
 ```
 
 `source_path` is important: this repository contains more than Home Assistant packages, so the app copies only that subtree. The complete subtree is copied, including non-YAML files; Home Assistant's `!include_dir_named` loader ignores files that are not YAML.
@@ -43,7 +43,12 @@ No GitHub key or token is required: the configured repository must be publicly r
 - Run the Home Assistant configuration check.
 - If validation fails, restore the previous directory and remember that failed source tree so it is not retried until the source subtree changes.
 - If validation succeeds, atomically rename the backup out of the rollback position; that rename is the commit point. Leftover old/staging directories are cleaned up on the next pass.
-- Optionally request a Home Assistant restart after a successful sync.
+- After a successful deployment, `after_sync` controls what happens next:
+  - `reload` (default) calls Home Assistant's quick `homeassistant.reload_all` action, matching **Quick reload all YAML configuration** in the UI;
+  - `restart` requests a full Home Assistant restart;
+  - `none` leaves the validated files in place without reloading or restarting.
+
+Quick reload only affects YAML-backed integrations that support reloading. Use `restart` for changes that require a full restart.
 
 Changing `destination_path` after the app has already synced is a manual migration: remove the old app-owned directory yourself so it is not left behind and loaded alongside the new one.
 
