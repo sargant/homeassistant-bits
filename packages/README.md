@@ -9,12 +9,14 @@ homeassistant:
 
 ## Manual deployment
 
-From a checkout of this repository:
+Run `copy-from-git.sh` from any machine that can SSH to Home Assistant:
 
 ```bash
-bash packages/copy-from-git.sh
+bash copy-from-git.sh
 ```
 
-The script copies the tracked contents of `packages/` from the current Git commit to `root@assistant:/config/packages/`. Existing files with the same names are overwritten; other files already in `/config/packages/` are left alone.
+No local Git checkout is used. The script downloads the current `main` branch archive directly from GitHub and streams the contents of its `packages/` directory to `root@assistant:/config/packages/`.
 
-It deliberately does not validate, reload, restart, or otherwise manage Home Assistant. Verify the configuration and reload it manually.
+Existing files with the same names are overwritten. Files that exist only in `/config/packages/` are left alone.
+
+It deliberately does not validate, reload, restart, roll back, or otherwise manage Home Assistant. Verify the configuration and reload it manually.
