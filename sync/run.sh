@@ -1,6 +1,10 @@
 #!/usr/bin/with-contenv bashio
 # shellcheck shell=bash
 
+# Pipelines below must fail if any stage fails. In particular, a failed
+# `git ls-files` must never be mistaken for an intentionally empty package set.
+set -o pipefail
+
 # This app is intentionally specific to this repository. It keeps its Git
 # checkout in /data and only deploys tracked YAML files from packages/ into the
 # Home Assistant package directory. Git never owns the Home Assistant config.
@@ -135,13 +139,17 @@ sync_packages() {
 
     # Fingerprint only tracked YAML package files. Changes elsewhere in this
     # bits-and-pieces repository (README, AGENTS.md, sync app, etc.) therefore
-    # do not trigger a Home Assistant deployment or config check.
-    fingerprint=$(
+    # do not trigger a Home Assistant deployment or config check. A failed Git
+    # index read is an error, not an empty package set.
+    if ! fingerprint=$(
         git -C "$CHECKOUT_DIR" ls-files -s -- "$SOURCE_DIR" \
             | awk '$0 ~ /\.ya?ml$/ { print }' \
             | sha256sum \
             | awk '{ print $1 }'
-    )
+    ); then
+        bashio::log.error "Could not fingerprint package files"
+        return 1
+    fi
 
     if [ -f "$DEPLOYED_FINGERPRINT" ]; then
         current_fingerprint=$(cat "$DEPLOYED_FINGERPRINT")
@@ -308,9 +316,16 @@ sync_packages() {
         return 1
     fi
 
+    # The ownership manifest is part of the deployment transaction. If it cannot
+    # be committed, put the live package directory back before discarding the
+    # rollback data; otherwise the filesystem and ownership record can diverge.
     if ! mv "$new_manifest" "$MANIFEST"; then
-        bashio::log.error "Config is valid but managed-file manifest could not be persisted"
+        bashio::log.error "Config is valid but managed-file manifest could not be persisted; rolling back"
+        if ! restore_files "$touched_manifest" "$backup_manifest" "$backup_dir"; then
+            bashio::log.error "Rollback also encountered errors"
+        fi
         rm -rf "$backup_dir"
+        rm -f "$new_manifest"
         return 1
     fi
 
