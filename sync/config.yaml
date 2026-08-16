@@ -1,0 +1,30 @@
+---
+name: Git Package Sync
+version: "0.1.0"
+slug: git_package_sync
+description: Sync one public Git repository subtree into Home Assistant
+url: https://github.com/sargant/homeassistant-bits/tree/main/sync
+arch:
+  - aarch64
+  - amd64
+startup: services
+boot: auto
+init: false
+hassio_api: true
+hassio_role: homeassistant
+map:
+  - homeassistant_config:rw
+options:
+  repository: https://github.com/sargant/homeassistant-bits.git
+  branch: main
+  source_path: packages
+  destination_path: packages/synced
+  interval: 300
+  auto_restart: false
+schema:
+  repository: str
+  branch: str
+  source_path: str
+  destination_path: str
+  interval: int
+  auto_restart: bool
