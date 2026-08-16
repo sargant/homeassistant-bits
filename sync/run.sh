@@ -27,6 +27,7 @@ PARENT=$(dirname "$DEST")
 NAME=$(basename "$DEST")
 STAGE="$PARENT/.${NAME}.sync-stage"
 BACKUP="$PARENT/.${NAME}.sync-backup"
+ABSENT="$PARENT/.${NAME}.sync-backup-absent"
 OLD="$PARENT/.${NAME}.sync-old"
 
 remote_head() {
@@ -50,8 +51,9 @@ update_checkout() {
 
 restore_backup() {
     rm -rf "$DEST" || return 1
-    if [ -f "$BACKUP/.absent" ]; then
-        rm -rf "$BACKUP"
+    if [ -f "$ABSENT" ]; then
+        rm -rf "$BACKUP" || return 1
+        rm -f "$ABSENT"
     else
         mv "$BACKUP" "$DEST"
     fi
@@ -63,6 +65,8 @@ recover_swap() {
     if [ -e "$BACKUP" ]; then
         bashio::log.warning "Recovering interrupted sync"
         restore_backup
+    else
+        rm -f "$ABSENT"
     fi
 }
 
@@ -74,11 +78,13 @@ build_stage() {
 
 install_stage() {
     rm -rf "$BACKUP" "$OLD" || return 1
+    rm -f "$ABSENT" || return 1
     if [ -e "$DEST" ]; then
         [ -d "$DEST" ] && [ ! -L "$DEST" ] || return 1
         mv "$DEST" "$BACKUP" || return 1
     else
-        mkdir -p "$BACKUP" && : > "$BACKUP/.absent" || return 1
+        : > "$ABSENT" || return 1
+        mkdir -p "$BACKUP" || { rm -f "$ABSENT"; return 1; }
     fi
 
     mv "$STAGE" "$DEST" || { restore_backup; return 1; }
@@ -94,6 +100,7 @@ install_stage() {
     # This rename is the commit point. If the app stops before it, startup
     # restores BACKUP. After it, the validated destination wins.
     mv "$BACKUP" "$OLD" || { restore_backup; return 1; }
+    rm -f "$ABSENT"
     rm -rf "$OLD" || bashio::log.warning "Could not remove old synced tree"
 }
 
