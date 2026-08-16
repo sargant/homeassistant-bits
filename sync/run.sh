@@ -25,11 +25,14 @@ valid_path "$DESTINATION" || bashio::exit.nok "destination_path must be a relati
 
 DEST="/homeassistant/$DESTINATION"
 PARENT=$(dirname "$DEST")
-NAME=$(basename "$DEST")
-STAGE="$PARENT/.${NAME}.sync-stage"
-BACKUP="$PARENT/.${NAME}.sync-backup"
-ABSENT="$PARENT/.${NAME}.sync-backup-absent"
-OLD="$PARENT/.${NAME}.sync-old"
+WORK_ROOT=/homeassistant/.git-package-sync
+WORK_ID=$(printf '%s' "$DESTINATION" | sha256sum | awk '{ print $1 }')
+WORK="$WORK_ROOT/$WORK_ID"
+OWNER="$WORK_ROOT/.owner"
+STAGE="$WORK/stage"
+BACKUP="$WORK/backup"
+ABSENT="$WORK/backup-absent"
+OLD="$WORK/old"
 
 remote_head() {
     git ls-remote "$REPOSITORY" "refs/heads/$BRANCH" | awk 'NR == 1 { print $1 }'
@@ -50,6 +53,22 @@ update_checkout() {
     git -C "$CHECKOUT" clean -fdq
 }
 
+prepare_workdir() {
+    if [ -e "$WORK_ROOT" ]; then
+        [ -d "$WORK_ROOT" ] && [ ! -L "$WORK_ROOT" ] || return 1
+        [ -f "$OWNER" ] && [ ! -L "$OWNER" ] && [ "$(cat "$OWNER")" = "git_package_sync" ] || return 1
+    else
+        mkdir "$WORK_ROOT" || return 1
+        if ! printf 'git_package_sync\n' > "$OWNER"; then
+            rmdir "$WORK_ROOT" 2>/dev/null || true
+            return 1
+        fi
+    fi
+
+    mkdir -p "$WORK" || return 1
+    [ -d "$WORK" ] && [ ! -L "$WORK" ]
+}
+
 restore_backup() {
     rm -rf "$DEST" || return 1
     if [ -f "$ABSENT" ]; then
@@ -62,6 +81,7 @@ restore_backup() {
 
 recover_swap() {
     mkdir -p "$PARENT" || return 1
+    prepare_workdir || return 1
     rm -rf "$STAGE" "$OLD" || return 1
     if [ -e "$BACKUP" ]; then
         bashio::log.warning "Recovering interrupted sync"
