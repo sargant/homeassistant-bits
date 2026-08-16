@@ -17,6 +17,8 @@ after_sync: reload
 
 `destination_path` is an ownership boundary. The app may replace or delete that entire directory during a sync. Do not put hand-managed files in it. With the default configuration, files elsewhere under `packages/` are untouched.
 
+The app keeps its temporary staging and rollback directories under `/homeassistant/.git-package-sync/`, outside the package tree. That hidden work area is marked as app-owned before it is used, so package siblings are never repurposed as transaction storage.
+
 ## Home Assistant configuration
 
 The existing package include is sufficient because `!include_dir_named` is recursive:
@@ -38,7 +40,7 @@ No GitHub key or token is required: the configured repository must be publicly r
 - If that HEAD has already been processed, do nothing else.
 - When HEAD changes, shallow-fetch it and inspect only `source_path`.
 - Use the Git tree hash of `source_path` as the content fingerprint, so commits elsewhere in the repository do not cause a deployment.
-- Build the whole source subtree in a staging directory next to the destination.
+- Build the whole source subtree in the hidden work area on the same Home Assistant config filesystem.
 - Swap the previous destination aside and put the complete candidate directory in its place.
 - Run the Home Assistant configuration check.
 - If validation fails, restore the previous directory and remember that failed source tree so it is not retried until the source subtree changes.
