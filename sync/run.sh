@@ -7,7 +7,7 @@ BRANCH=$(bashio::config 'branch')
 SOURCE=$(bashio::config 'source_path')
 DESTINATION=$(bashio::config 'destination_path')
 INTERVAL=$(bashio::config 'interval')
-AUTO_RESTART=$(bashio::config 'auto_restart')
+AFTER_SYNC=$(bashio::config 'after_sync')
 
 CHECKOUT=/data/repository
 PROCESSED=/data/processed
@@ -15,8 +15,9 @@ DEPLOYED=/data/deployed
 FAILED=/data/failed
 
 case "$REPOSITORY" in https://*) ;; *) bashio::exit.nok "repository must be a public HTTPS Git URL" ;; esac
+case "$AFTER_SYNC" in none|reload|restart) ;; *) bashio::exit.nok "after_sync must be none, reload, or restart" ;; esac
 valid_path() {
-    case "$1" in ""|/*|.|..|../*|*/../*|*/..) return 1 ;; *) return 0 ;; esac
+    case "$1" in ""|/*|.|..|../*|*/../*|*/..|*/.) return 1 ;; *) return 0 ;; esac
 }
 valid_path "$SOURCE" || bashio::exit.nok "source_path must be a relative directory"
 valid_path "$DESTINATION" || bashio::exit.nok "destination_path must be a relative directory"
@@ -104,6 +105,27 @@ install_stage() {
     rm -rf "$OLD" || bashio::log.warning "Could not remove old synced tree"
 }
 
+after_sync() {
+    case "$AFTER_SYNC" in
+        none)
+            ;;
+        reload)
+            bashio::log.info "Reloading Home Assistant YAML configuration"
+            if ! curl -fsS -X POST \
+                -H "Authorization: Bearer ${SUPERVISOR_TOKEN}" \
+                -H "Content-Type: application/json" \
+                -d '{}' \
+                http://supervisor/core/api/services/homeassistant/reload_all >/dev/null; then
+                bashio::log.error "Home Assistant YAML reload failed"
+            fi
+            ;;
+        restart)
+            bashio::log.info "Restarting Home Assistant"
+            bashio::core.restart || bashio::log.error "Home Assistant restart request failed"
+            ;;
+    esac
+}
+
 sync_once() {
     local head key tree sync_key deployed="" failed="" result
     recover_swap || return 1
@@ -139,9 +161,7 @@ sync_once() {
     rm -f "$FAILED"
     printf '%s\n' "$key" > "$PROCESSED" || return 1
     bashio::log.info "Synced $SOURCE to $DESTINATION"
-    if [ "$AUTO_RESTART" = "true" ]; then
-        bashio::core.restart || bashio::log.error "Home Assistant restart request failed"
-    fi
+    after_sync
 }
 
 bashio::log.info "Watching $REPOSITORY ($BRANCH) every ${INTERVAL}s"
