@@ -510,12 +510,12 @@ template:
         icon: mdi:dishwasher
         state: >-
           {% set cycle = states('sensor.kitchen_dishwasher_cycle_state') %}
-          {% if cycle == 'Idle' %}
-            Idle
-          {% elif cycle == 'Finished' %}
-            Finished
-          {% else %}
+          {% if cycle in ['Idle', 'Finished'] %}
+            {{ cycle }}
+          {% elif cycle in ['Starting', 'Running', 'Ending', 'Finish pending'] %}
             Running
+          {% else %}
+            {{ cycle }}
           {% endif %}
 
 # -----------------------------------------------------------------------------
