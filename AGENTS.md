@@ -103,8 +103,8 @@ explicitly asked.
 ## Git behaviour
 
 Agents may interact with GitHub directly when making requested repository
-changes. Do not require a separate confirmation merely to create a commit or
-push the requested change.
+changes. Do not require a separate confirmation merely to create a commit, push
+a branch, or open a pull request for the requested change.
 
 Never commit directly to the repository's default branch.
 
@@ -117,11 +117,15 @@ start with `agents/`.
 
 Commit the requested changes to that branch and push the branch to GitHub.
 
-Do not create, open, or merge a pull request / merge request. Do not merge the
-branch into the default branch.
+When the requested change is ready for review, open a pull request from the work
+branch to the default branch unless the user explicitly asks not to.
+
+Do not merge the pull request or merge the branch into the default branch unless
+explicitly asked.
 
 Do not force-push, rewrite branch history, create tags, or create releases
 unless explicitly asked.
 
-After pushing changes, tell the user which branch was used and briefly describe
-what was committed. Include the commit SHA when it is available.
+After pushing changes, tell the user which branch was used, briefly describe
+what was committed, and link the pull request when one was opened. Include the
+commit SHA when it is available.
