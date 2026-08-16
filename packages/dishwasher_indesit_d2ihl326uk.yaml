@@ -1,14 +1,14 @@
-# Dishwasher cycle detector — v4.2
+# Dishwasher cycle detector — v4.2.1
 #
 # This package infers a dishwasher cycle from the power and cumulative-energy
 # sensors exposed by the dishwasher's smart plug. It deliberately keeps the
 # detection logic in YAML so every part remains visible and inspectable in
 # Home Assistant.
 #
-# v4.2 keeps the proven cycle-state algorithm unchanged, but reduces UI clutter
-# by treating the cycle-state sensor as the single public data object. Historical
-# timestamps, duration, energy and the convenient running flag are attributes on
-# that sensor instead of separate template entities.
+# v4.2 moved historical timestamps, duration and energy into attributes on the
+# cycle-state sensor to reduce UI clutter. v4.2.1 keeps that compact bookkeeping
+# but restores two thin public entities for useful time-series history: a binary
+# running sensor and a simplified Idle / Running / Finished phase sensor.
 #
 # Installation / search-and-replace
 # ---------------------------------
@@ -119,16 +119,16 @@ timer:
 
 
 # -----------------------------------------------------------------------------
-# TEMPLATE ENTITY
+# TEMPLATE ENTITIES
 # -----------------------------------------------------------------------------
 template:
   # ---------------------------------------------------------------------------
   # CYCLE STATE MACHINE
   # ---------------------------------------------------------------------------
-  # This trigger-based template sensor is both the state machine and the compact
-  # public record of dishwasher-cycle information. Home Assistant restores its
+  # This trigger-based template sensor is the state machine and the compact
+  # record of dishwasher-cycle bookkeeping. Home Assistant restores its
   # previous state and attributes, so timestamps and measurements do not need
-  # separate input helpers or derived template sensors.
+  # separate input helpers or derived historical-value template sensors.
   #
   # Every relevant power threshold, timer expiry and Home Assistant startup
   # wakes this block. The `actions` section first calculates `next_state`, then
@@ -408,16 +408,9 @@ template:
         # removes indentation/newlines introduced by the readable Jinja block.
         state: "{{ next_state | trim }}"
 
-        # Everything useful about the current/last cycle lives here. Attributes
-        # are restored with the trigger-based sensor but do not create separate
-        # Helper-list entries in the UI.
+        # Historical values remain attributes of this one restored sensor. They
+        # are implementation/bookkeeping data, not independent UI concepts.
         attributes:
-          # Convenience replacement for the old Dishwasher running binary sensor.
-          # Starting is deliberately false because the candidate has not yet
-          # been confirmed as a real cycle.
-          running: >-
-            {{ (next_state | trim) in ['Running', 'Ending', 'Finish pending'] }}
-
           # Record the moment the first >5 W candidate activity appeared. This
           # becomes the cycle start time if the candidate is later confirmed.
           candidate_started_at: >-
@@ -491,6 +484,40 @@ template:
               {{ this.attributes.get('last_cycle_energy_kwh') }}
             {% endif %}
 
+  # ---------------------------------------------------------------------------
+  # PUBLIC DERIVED ENTITIES
+  # ---------------------------------------------------------------------------
+  # Keep only states that are useful as independent time series. These are thin
+  # views over the detailed lifecycle above; they hold no implementation state.
+  - binary_sensor:
+      # Public yes/no activity signal. Starting, Ending and Finish pending are
+      # deliberately collapsed into "running" so consumers do not need to know
+      # about the detector's internal transition states.
+      - name: Dishwasher running
+        unique_id: dishwasher_running
+        default_entity_id: binary_sensor.kitchen_dishwasher_running
+        device_class: running
+        state: >-
+          {{ states('sensor.kitchen_dishwasher_cycle_state')
+             in ['Starting', 'Running', 'Ending', 'Finish pending'] }}
+
+  - sensor:
+      # Simplified public lifecycle for dashboards, history exports and future
+      # phase classification. Internal transition states all appear as Running.
+      - name: Dishwasher phase
+        unique_id: dishwasher_phase
+        default_entity_id: sensor.kitchen_dishwasher_phase
+        icon: mdi:dishwasher
+        state: >-
+          {% set cycle = states('sensor.kitchen_dishwasher_cycle_state') %}
+          {% if cycle == 'Idle' %}
+            Idle
+          {% elif cycle == 'Finished' %}
+            Finished
+          {% else %}
+            Running
+          {% endif %}
+
 # -----------------------------------------------------------------------------
 # NOTIFICATIONS
 # -----------------------------------------------------------------------------
@@ -545,13 +572,16 @@ automation:
 
 # UI footprint
 # ------------
-# The package now deliberately creates only four helper-like entities:
+# The package deliberately keeps bookkeeping in attributes, while exposing only
+# the states that are useful to graph, export or consume elsewhere:
 #
-#   sensor.kitchen_dishwasher_cycle_state
+#   sensor.kitchen_dishwasher_cycle_state   detailed detector lifecycle
+#   binary_sensor.kitchen_dishwasher_running simple running / not-running state
+#   sensor.kitchen_dishwasher_phase         Idle / Running / Finished
 #   timer.dishwasher_start_confirm
 #   timer.dishwasher_end_window
 #   timer.dishwasher_finish_confirm
 #
-# Running status and all last-cycle metadata are attributes of the cycle-state
-# sensor. This keeps implementation details available for diagnostics and
-# automations without giving each one its own row in Settings > Helpers.
+# Last-start, last-finish, duration and cycle-energy values remain attributes of
+# the cycle-state sensor and can be promoted back to first-class entities later
+# if there is a real dashboard, statistics or history use for them.
