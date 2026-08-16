@@ -1,4 +1,4 @@
-# Dishwasher cycle detector — v4.2.1
+# Dishwasher cycle detector — v4.3.0
 #
 # This package infers a dishwasher cycle from the power and cumulative-energy
 # sensors exposed by the dishwasher's smart plug. It deliberately keeps the
@@ -6,9 +6,18 @@
 # Home Assistant.
 #
 # v4.2 moved historical timestamps, duration and energy into attributes on the
-# cycle-state sensor to reduce UI clutter. v4.2.1 keeps that compact bookkeeping
-# but restores two thin public entities for useful time-series history: a binary
-# running sensor and a simplified Idle / Running / Finished phase sensor.
+# cycle-state sensor to reduce UI clutter. v4.2.1 restored thin public running
+# and phase entities for useful time-series history.
+#
+# v4.3 simplifies end detection. The previous Ending -> Finish pending sequence
+# assumed a final >5 W burst after a long low-power period. That fitted the
+# observed drying cycles but could strand a programme that simply goes quiet.
+# The two states are now one End armed state:
+#
+#   - seven continuous minutes below 30 W arms the end;
+#   - once armed, one continuous minute below 5 W finishes the cycle;
+#   - any return above 30 W proves the dishwasher is still active and returns
+#     the detector to Running.
 #
 # Installation / search-and-replace
 # ---------------------------------
@@ -26,26 +35,10 @@
 #
 # Notifications use the modern notify.send_message action and target every
 # notify entity carrying the Home Assistant label with ID `Receive push notifications`.
-# Create a label named "Receive push notifications" and assign it to the notify entities
-# that should receive appliance-finished notifications.
-#
-# The finish-notification cost is calculated as completed-cycle kWh multiplied
-# by the current unit rate at the moment the cycle finishes.
-#
-# Input entities
-# --------------
-# Instantaneous power:
-#   sensor.kitchen_dishwasher_socket_power
-#
-# Cumulative energy:
-#   sensor.kitchen_dishwasher_socket_energy
-#
-# Electricity unit rate:
-#   sensor.octopus_energy_electricity_15p0128357_1640000213346_current_rate
 #
 # State-machine overview
 # ----------------------
-# Idle -> Starting -> Running -> Ending -> Finish pending -> Finished -> Idle
+# Idle -> Starting -> Running -> End armed -> Finished -> Idle
 #
 # Idle
 #   No cycle is believed to be in progress. A rise above 5 W creates a possible
@@ -58,60 +51,46 @@
 #   to Idle.
 #
 # Running
-#   A cycle has been confirmed. Every fall below 30 W opens a 15-minute end
-#   window. Any return above 30 W cancels that window and keeps the cycle
-#   Running. Remaining below 30 W for the full 15 minutes means the machine is
-#   entering its end sequence.
+#   Every fall below 30 W opens a seven-minute end window. Any return above
+#   30 W cancels that window. Remaining below 30 W for the full seven minutes
+#   moves to End armed.
 #
-# Ending
-#   The 15-minute end window expired while power was below 5 W. We deliberately
-#   do not finish immediately: the observed dishwasher profile has one final
-#   burst above 5 W. That burst moves the detector to Finish pending.
-#
-# Finish pending
-#   The final burst has happened (or the 15-minute window expired while power
-#   was already between 5 W and 30 W). Once power drops below 5 W, a 60-second
-#   confirmation timer starts. Any rise back above 5 W cancels it. If the full
-#   minute passes below 5 W, the cycle is considered Finished.
+# End armed
+#   The low-power period has lasted long enough that the cycle is allowed to
+#   finish. Power must remain below 5 W for one minute before Finished is
+#   declared. A rise above 5 W cancels only that one-minute finish confirmation;
+#   a rise above 30 W proves the cycle is still properly active and returns to
+#   Running.
 #
 # Finished
 #   The finish timestamp, duration and energy are captured. The detector stays
-#   Finished until the appliance has been below 1 W for 60 seconds, at which
-#   point it returns to Idle ready for the next cycle.
+#   Finished until the appliance has been below 1 W for 60 seconds, then returns
+#   to Idle ready for the next cycle.
 #
 # Threshold summary
 # -----------------
-# >5 W              candidate activity / final activity
-# >30 W             confirms or re-confirms active washing
-# 6 minutes         maximum time for a candidate start to reach >30 W
-# 15 minutes <30 W  arms the end sequence
-# 60 seconds <5 W   confirms the final finish
-# 60 seconds <1 W   confirms the appliance has gone fully idle
+# >5 W             candidate activity / cancels pending finish
+# >30 W            confirms or re-confirms active washing
+# 6 minutes        maximum time for a candidate start to reach >30 W
+# 7 minutes <30 W  arms the end
+# 60 seconds <5 W  confirms the finish once armed
+# 60 seconds <1 W  confirms the appliance has gone fully idle
 
 
 # -----------------------------------------------------------------------------
 # TIMERS
 # -----------------------------------------------------------------------------
-# These are the only traditional helpers retained by the package. Each timer
-# represents a real time window in the detector, rather than merely storing
-# state. `restore: true` allows an active timer to survive a Home Assistant
-# restart as far as Home Assistant's timer restoration permits.
 timer:
-  # Gives a >5 W candidate start six minutes to prove itself by reaching >30 W.
   dishwasher_start_confirm:
     name: Dishwasher start confirmation
     duration: "00:06:00"
     restore: true
 
-  # Starts whenever a confirmed Running cycle falls below 30 W. If the machine
-  # does not return above 30 W for 15 minutes, we enter the end sequence.
   dishwasher_end_window:
     name: Dishwasher end window
-    duration: "00:15:00"
+    duration: "00:07:00"
     restore: true
 
-  # Once the final burst is over, power must remain below 5 W for a full minute
-  # before we declare the cycle finished.
   dishwasher_finish_confirm:
     name: Dishwasher finish confirmation
     duration: "00:01:00"
@@ -122,230 +101,121 @@ timer:
 # TEMPLATE ENTITIES
 # -----------------------------------------------------------------------------
 template:
-  # ---------------------------------------------------------------------------
-  # CYCLE STATE MACHINE
-  # ---------------------------------------------------------------------------
-  # This trigger-based template sensor is the state machine and the compact
-  # record of dishwasher-cycle bookkeeping. Home Assistant restores its
-  # previous state and attributes, so timestamps and measurements do not need
-  # separate input helpers or derived historical-value template sensors.
-  #
-  # Every relevant power threshold, timer expiry and Home Assistant startup
-  # wakes this block. The `actions` section first calculates `next_state`, then
-  # performs any timer side-effects, and finally the sensor publishes that
-  # calculated state and updates its bookkeeping attributes.
   - triggers:
-      # Power has crossed upward through 5 W.
-      # Used both to spot a possible start and to spot the final end-of-cycle
-      # burst after the long low-power period.
       - trigger: numeric_state
         entity_id: sensor.kitchen_dishwasher_socket_power
         above: 5
         id: above_5
 
-      # Power has crossed downward through 5 W.
-      # In Finish pending this starts the one-minute finish confirmation timer.
       - trigger: numeric_state
         entity_id: sensor.kitchen_dishwasher_socket_power
         below: 5
         id: below_5
 
-      # Power has crossed upward through 30 W.
-      # This confirms a candidate cycle, or proves that a supposedly ending
-      # cycle has become active again.
       - trigger: numeric_state
         entity_id: sensor.kitchen_dishwasher_socket_power
         above: 30
         id: above_30
 
-      # Power has crossed downward through 30 W.
-      # During Running this opens the 15-minute end window.
       - trigger: numeric_state
         entity_id: sensor.kitchen_dishwasher_socket_power
         below: 30
         id: below_30
 
-      # Power has remained below 1 W for a full minute.
-      # This is our strong signal that the appliance is genuinely asleep.
       - trigger: numeric_state
         entity_id: sensor.kitchen_dishwasher_socket_power
         below: 1
         for: "00:01:00"
         id: asleep
 
-      # The six-minute candidate-start confirmation window has expired.
       - trigger: timer.finished
         target:
           entity_id: timer.dishwasher_start_confirm
         id: start_timeout
 
-      # The machine has remained below 30 W for the full 15-minute end window.
       - trigger: timer.finished
         target:
           entity_id: timer.dishwasher_end_window
         id: end_timeout
 
-      # Power has remained below 5 W for the full one-minute finish window.
       - trigger: timer.finished
         target:
           entity_id: timer.dishwasher_finish_confirm
         id: finish_timeout
 
-      # Re-evaluate the detector after Home Assistant starts. This repairs the
-      # conservative timing windows when HA was offline across a timer expiry.
       - trigger: homeassistant
         event: start
         id: startup
 
-      # Reloading Template entities recreates trigger-based sensors before any
-      # of their normal triggers have fired, so their initial state is Unknown.
-      # Home Assistant emits event_template_reloaded after a template reload;
-      # treat it exactly like startup so the detector immediately establishes a
-      # sensible state (normally Idle when the dishwasher is off).
       - trigger: event
         event_type: event_template_reloaded
         id: startup
 
     actions:
-      # -----------------------------------------------------------------------
-      # CALCULATE THE NEXT STATE
-      # -----------------------------------------------------------------------
       - variables:
-          # Read the state currently published by the cycle-state sensor.
-          # On its very first load it may be unknown/unavailable, so only our six
-          # explicit sentence-case states are accepted; anything else is treated
-          # as Idle. Reading the entity through states() makes that fallback
-          # explicit and works cleanly for both startup and template reload.
           s: >-
             {% set previous = states('sensor.kitchen_dishwasher_cycle_state') %}
             {{ previous if previous in
-               ['Idle', 'Starting', 'Running', 'Ending', 'Finish pending', 'Finished']
+               ['Idle', 'Starting', 'Running', 'End armed', 'Finished']
                else 'Idle' }}
 
-          # Snapshot the current plug power once for this execution. Using a
-          # variable keeps all of the transition tests below consistent.
           p: "{{ states('sensor.kitchen_dishwasher_socket_power') | float(0) }}"
 
-          # Work out which state this particular trigger should produce.
-          # If no rule applies, the final `else` simply preserves the old state.
           next_state: >-
-            {# Idle -> Starting: first meaningful sign of appliance activity. #}
             {% if trigger.id == 'above_5' and s == 'Idle' %}
               Starting
-
-            {# Starting -> Running: >30 W arrived before the six-minute
-               confirmation timer expired, so this is a real cycle. #}
             {% elif trigger.id == 'above_30' and s == 'Starting'
                     and is_state('timer.dishwasher_start_confirm', 'active') %}
               Running
-
-            {# Starting -> Idle: candidate never became a real cycle, either
-               because its timer expired or because the machine went asleep. #}
             {% elif trigger.id in ['start_timeout', 'asleep'] and s == 'Starting' %}
               Idle
-
-            {# Running/Ending/Finish pending -> Running: activity above 30 W
-               means the dishwasher is unquestionably active again. #}
-            {% elif trigger.id == 'above_30'
-                    and s in ['Running', 'Ending', 'Finish pending'] %}
+            {% elif trigger.id == 'above_30' and s in ['Running', 'End armed'] %}
               Running
-
-            {# Running -> Ending or Finish pending: the dishwasher has stayed
-               below 30 W for 15 minutes. If it is currently still above 5 W,
-               that activity can itself be the final burst, so skip straight to
-               Finish pending. Otherwise wait in Ending for that burst. #}
             {% elif trigger.id == 'end_timeout' and s == 'Running' and p < 30 %}
-              {{ 'Finish pending' if p > 5 else 'Ending' }}
-
-            {# Ending -> Finish pending: the final >5 W burst has appeared. #}
-            {% elif trigger.id == 'above_5' and s == 'Ending' %}
-              Finish pending
-
-            {# Finish pending -> Finished: after the final burst, power has now
-               remained below 5 W for the whole one-minute confirmation period. #}
-            {% elif trigger.id == 'finish_timeout' and s == 'Finish pending' and p < 5 %}
+              End armed
+            {% elif trigger.id == 'finish_timeout' and s == 'End armed' and p < 5 %}
               Finished
-
-            {# Finished -> Idle: after recording completion, wait until the
-               dishwasher has really gone to sleep (<1 W for one minute). #}
             {% elif trigger.id == 'asleep' and s == 'Finished' %}
               Idle
-
-            {# STARTUP RECONCILIATION --------------------------------------- #}
-            {# Starting + >30 W on startup: HA restarted during a genuine start;
-               the current power is enough to confirm the cycle immediately. #}
             {% elif trigger.id == 'startup' and s == 'Starting' and p > 30 %}
               Running
-
-            {# Starting + no restored confirmation timer: there is no longer a
-               trustworthy candidate-start window, so conservatively reset. #}
             {% elif trigger.id == 'startup' and s == 'Starting'
                     and is_state('timer.dishwasher_start_confirm', 'idle') %}
               Idle
-
-            {# Ending + >30 W on startup: the dishwasher became active again. #}
-            {% elif trigger.id == 'startup' and s == 'Ending' and p > 30 %}
+            {% elif trigger.id == 'startup' and s == 'End armed' and p > 30 %}
               Running
-
-            {# Ending + 5..30 W on startup: the final burst is already present,
-               so the detector can move directly to Finish pending. #}
-            {% elif trigger.id == 'startup' and s == 'Ending' and 5 < p < 30 %}
-              Finish pending
-
-            {# Finish pending + >30 W on startup: strong activity invalidates
-               the pending finish and returns us to Running. #}
-            {% elif trigger.id == 'startup' and s == 'Finish pending' and p > 30 %}
-              Running
-
-            {# Finished + <1 W on startup: the machine is already fully asleep,
-               so there is no reason to retain Finished after the restart. #}
             {% elif trigger.id == 'startup' and s == 'Finished' and p < 1 %}
               Idle
-
-            {# No transition rule matched: keep the current state unchanged. #}
             {% else %}
               {{ s }}
             {% endif %}
 
-      # -----------------------------------------------------------------------
-      # TIMER SIDE-EFFECTS
-      # -----------------------------------------------------------------------
-      # The state calculation above is purely declarative. These small actions
-      # start/cancel the timing windows needed by that state machine. Nothing in
-      # this automation sleeps or waits; timer.finished events wake it later.
-
-      # Idle -> Starting begins the six-minute candidate confirmation window.
+      # Idle -> Starting begins the six-minute candidate window.
       - if: "{{ trigger.id == 'above_5' and s == 'Idle' }}"
         then:
           - action: timer.start
             target:
               entity_id: timer.dishwasher_start_confirm
 
-      # Once Starting either becomes Running or is disproved by going fully
-      # asleep, the candidate-start timer is no longer useful.
-      - if: >
-          {{ (trigger.id == 'above_30' and s == 'Starting')
-             or (trigger.id == 'asleep' and s == 'Starting') }}
+      # Leaving Starting makes its confirmation timer obsolete.
+      - if: >-
+          {{ s == 'Starting' and (next_state | trim) != 'Starting'
+             and is_state('timer.dishwasher_start_confirm', 'active') }}
         then:
           - action: timer.cancel
             target:
               entity_id: timer.dishwasher_start_confirm
 
-      # Every drop below 30 W during Running opens a fresh 15-minute end window.
-      # A subsequent >30 W trigger will cancel it below.
+      # Every Running drop below 30 W starts a fresh seven-minute end window.
       - if: "{{ trigger.id == 'below_30' and s == 'Running' }}"
         then:
           - action: timer.start
             target:
               entity_id: timer.dishwasher_end_window
 
-      # Strong >30 W activity means any pending end/finish timers are obsolete.
-      # The startup form handles the same situation after HA has restarted.
-      - if: >
-          {{ (trigger.id == 'above_30'
-              and s in ['Running', 'Ending', 'Finish pending'])
-             or (trigger.id == 'startup'
-                 and s in ['Ending', 'Finish pending'] and p > 30) }}
+      # Returning above 30 W cancels any pending end/finish confirmation.
+      - if: >-
+          {{ trigger.id == 'above_30' and s in ['Running', 'End armed'] }}
         then:
           - action: timer.cancel
             target:
@@ -353,32 +223,30 @@ template:
                 - timer.dishwasher_end_window
                 - timer.dishwasher_finish_confirm
 
-      # While Finish pending, another rise above 5 W means the final activity is
-      # still continuing, so cancel any one-minute finish confirmation underway.
-      - if: "{{ trigger.id == 'above_5' and s == 'Finish pending' }}"
+      # Once End armed, activity above 5 W cancels the quiet-minute confirmation.
+      - if: "{{ trigger.id == 'above_5' and s == 'End armed' }}"
         then:
           - action: timer.cancel
             target:
               entity_id: timer.dishwasher_finish_confirm
 
-      # When Finish pending falls below 5 W, start the one-minute quiet-period
-      # confirmation. If power rises again, the block above cancels it.
-      - if: "{{ trigger.id == 'below_5' and s == 'Finish pending' }}"
+      # If the end window expires while already below 5 W, start the quiet
+      # minute immediately; no later >5 W burst is required.
+      - if: >-
+          {{ trigger.id == 'end_timeout' and s == 'Running' and p < 5 }}
         then:
           - action: timer.start
             target:
               entity_id: timer.dishwasher_finish_confirm
 
-      # -----------------------------------------------------------------------
-      # STARTUP TIMER REPAIR
-      # -----------------------------------------------------------------------
-      # A restored timer that actually expired while Home Assistant was offline
-      # does not emit a historical timer.finished event after startup. If the
-      # restored state says we still need one of those conservative windows and
-      # its timer is idle, start a fresh full window instead of guessing.
+      - if: "{{ trigger.id == 'below_5' and s == 'End armed' }}"
+        then:
+          - action: timer.start
+            target:
+              entity_id: timer.dishwasher_finish_confirm
 
-      # Running while currently below 30 W still needs an end window.
-      - if: >
+      # Recreate required windows after startup if restored timers are idle.
+      - if: >-
           {{ trigger.id == 'startup' and s == 'Running' and p < 30
              and is_state('timer.dishwasher_end_window', 'idle') }}
         then:
@@ -386,33 +254,21 @@ template:
             target:
               entity_id: timer.dishwasher_end_window
 
-      # Finish pending while currently below 5 W still needs a finish window.
-      - if: >
-          {{ trigger.id == 'startup' and s == 'Finish pending' and p < 5
+      - if: >-
+          {{ trigger.id == 'startup' and s == 'End armed' and p < 5
              and is_state('timer.dishwasher_finish_confirm', 'idle') }}
         then:
           - action: timer.start
             target:
               entity_id: timer.dishwasher_finish_confirm
 
-    # -------------------------------------------------------------------------
-    # STATE-MACHINE SENSOR + PERSISTED BOOKKEEPING
-    # -------------------------------------------------------------------------
     sensor:
       - name: Dishwasher cycle state
         unique_id: dishwasher_cycle_state
         default_entity_id: sensor.kitchen_dishwasher_cycle_state
         icon: mdi:dishwasher
-
-        # Publish the state selected by the transition table above. `trim`
-        # removes indentation/newlines introduced by the readable Jinja block.
         state: "{{ next_state | trim }}"
-
-        # Historical values remain attributes of this one restored sensor. They
-        # are implementation/bookkeeping data, not independent UI concepts.
         attributes:
-          # Record the moment the first >5 W candidate activity appeared. This
-          # becomes the cycle start time if the candidate is later confirmed.
           candidate_started_at: >-
             {% if s == 'Idle' and next_state | trim == 'Starting' %}
               {{ now().isoformat() }}
@@ -420,7 +276,6 @@ template:
               {{ this.attributes.get('candidate_started_at') }}
             {% endif %}
 
-          # Snapshot cumulative energy at the same candidate-start moment.
           candidate_start_energy_kwh: >-
             {% if s == 'Idle' and next_state | trim == 'Starting' %}
               {{ states('sensor.kitchen_dishwasher_socket_energy') | float(0) }}
@@ -428,8 +283,6 @@ template:
               {{ this.attributes.get('candidate_start_energy_kwh') }}
             {% endif %}
 
-          # Once Starting is confirmed as Running, promote the candidate start
-          # timestamp to the official start timestamp for this cycle.
           last_started_at: >-
             {% if s == 'Starting' and next_state | trim == 'Running' %}
               {{ this.attributes.get('candidate_started_at') }}
@@ -437,7 +290,6 @@ template:
               {{ this.attributes.get('last_started_at') }}
             {% endif %}
 
-          # Promote the candidate energy snapshot at the same time.
           last_started_energy_kwh: >-
             {% if s == 'Starting' and next_state | trim == 'Running' %}
               {{ this.attributes.get('candidate_start_energy_kwh') }}
@@ -445,20 +297,15 @@ template:
               {{ this.attributes.get('last_started_energy_kwh') }}
             {% endif %}
 
-          # When Finish pending becomes Finished, the one-minute confirmation
-          # has just elapsed. Subtract that minute so the recorded finish time
-          # refers to the actual drop below 5 W rather than the timer expiry.
           last_finished_at: >-
-            {% if s == 'Finish pending' and next_state | trim == 'Finished' %}
+            {% if s == 'End armed' and next_state | trim == 'Finished' %}
               {{ as_datetime(as_timestamp(now()) - 60).isoformat() }}
             {% else %}
               {{ this.attributes.get('last_finished_at') }}
             {% endif %}
 
-          # Duration is measured from the original candidate start (the moment
-          # useful activity first appeared) to the adjusted finish time above.
           last_duration_s: >-
-            {% if s == 'Finish pending' and next_state | trim == 'Finished' %}
+            {% if s == 'End armed' and next_state | trim == 'Finished' %}
               {% set started = this.attributes.get('last_started_at') %}
               {% if started %}
                 {{ (((as_timestamp(now()) - 60) - as_timestamp(started)) | round(0)) }}
@@ -469,10 +316,8 @@ template:
               {{ this.attributes.get('last_duration_s') }}
             {% endif %}
 
-          # Last-cycle energy is the change in the plug's cumulative kWh counter
-          # between the stored cycle-start snapshot and the moment we finish.
           last_cycle_energy_kwh: >-
-            {% if s == 'Finish pending' and next_state | trim == 'Finished' %}
+            {% if s == 'End armed' and next_state | trim == 'Finished' %}
               {% set start_energy = this.attributes.get('last_started_energy_kwh') %}
               {% if start_energy is not none %}
                 {{ ((states('sensor.kitchen_dishwasher_socket_energy') | float(0))
@@ -484,26 +329,16 @@ template:
               {{ this.attributes.get('last_cycle_energy_kwh') }}
             {% endif %}
 
-  # ---------------------------------------------------------------------------
-  # PUBLIC DERIVED ENTITIES
-  # ---------------------------------------------------------------------------
-  # Keep only states that are useful as independent time series. These are thin
-  # views over the detailed lifecycle above; they hold no implementation state.
   - binary_sensor:
-      # Public yes/no activity signal. Starting, Ending and Finish pending are
-      # deliberately collapsed into "running" so consumers do not need to know
-      # about the detector's internal transition states.
       - name: Dishwasher running
         unique_id: dishwasher_running
         default_entity_id: binary_sensor.kitchen_dishwasher_running
         device_class: running
         state: >-
           {{ states('sensor.kitchen_dishwasher_cycle_state')
-             in ['Starting', 'Running', 'Ending', 'Finish pending'] }}
+             in ['Starting', 'Running', 'End armed'] }}
 
   - sensor:
-      # Simplified public lifecycle for dashboards, history exports and future
-      # phase classification. Internal transition states all appear as Running.
       - name: Dishwasher phase
         unique_id: dishwasher_phase
         default_entity_id: sensor.kitchen_dishwasher_phase
@@ -512,18 +347,16 @@ template:
           {% set cycle = states('sensor.kitchen_dishwasher_cycle_state') %}
           {% if cycle in ['Idle', 'Finished'] %}
             {{ cycle }}
-          {% elif cycle in ['Starting', 'Running', 'Ending', 'Finish pending'] %}
+          {% elif cycle in ['Starting', 'Running', 'End armed'] %}
             Running
           {% else %}
             {{ cycle }}
           {% endif %}
 
+
 # -----------------------------------------------------------------------------
 # NOTIFICATIONS
 # -----------------------------------------------------------------------------
-# Notifications consume attributes directly from the cycle-state transition.
-# No standalone "last started", "last finished", duration or energy entities
-# are needed just to format these messages.
 automation:
   - id: dishwasher_started_notification
     alias: Dishwasher started notification
@@ -551,7 +384,7 @@ automation:
     triggers:
       - trigger: state
         entity_id: sensor.kitchen_dishwasher_cycle_state
-        from: "Finish pending"
+        from: "End armed"
         to: "Finished"
     actions:
       - action: notify.send_message
@@ -572,16 +405,14 @@ automation:
 
 # UI footprint
 # ------------
-# The package deliberately keeps bookkeeping in attributes, while exposing only
-# the states that are useful to graph, export or consume elsewhere:
+# The package keeps bookkeeping in attributes while exposing only useful states:
 #
-#   sensor.kitchen_dishwasher_cycle_state   detailed detector lifecycle
-#   binary_sensor.kitchen_dishwasher_running simple running / not-running state
-#   sensor.kitchen_dishwasher_phase         Idle / Running / Finished
+#   sensor.kitchen_dishwasher_cycle_state    detailed detector lifecycle
+#   binary_sensor.kitchen_dishwasher_running running / not-running
+#   sensor.kitchen_dishwasher_phase          Idle / Running / Finished
 #   timer.dishwasher_start_confirm
 #   timer.dishwasher_end_window
 #   timer.dishwasher_finish_confirm
 #
 # Last-start, last-finish, duration and cycle-energy values remain attributes of
-# the cycle-state sensor and can be promoted back to first-class entities later
-# if there is a real dashboard, statistics or history use for them.
+# the cycle-state sensor.
