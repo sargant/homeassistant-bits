@@ -1,6 +1,6 @@
 # Package sync
 
-Tiny local Home Assistant app that watches `main` in this repository and deploys only tracked `packages/**/*.yaml` / `*.yml` files into Home Assistant's `packages/` directory.
+Tiny local Home Assistant app that watches `main` in this repository and deploys only tracked `packages/**/*.yaml` files into Home Assistant's `packages/` directory.
 
 It deliberately does **not** turn `/config` into a Git checkout. The private clone lives in the app's `/data`, and only package YAML is copied into Home Assistant.
 
@@ -29,13 +29,16 @@ Start the app and check its logs.
 - does not fetch the repository, inspect files or run a Home Assistant check when that HEAD has already been processed;
 - when HEAD changes, fetches the new commit and considers only tracked package YAML;
 - ignores changes outside tracked package YAML, so README/agent/sync-app edits do not cause a Home Assistant deployment;
-- remembers package content that failed Home Assistant validation and does not retry that same package fingerprint until package YAML changes;
+- treats removal of the whole `packages/` directory as an empty managed package set, so previously managed files are removed;
+- remembers package content that repeatedly fails Home Assistant validation while the restored baseline remains valid, and does not retry that package fingerprint until package YAML changes;
 - tracks which package files it owns and removes them when they are removed or renamed in Git;
 - never deletes unrelated local package files;
-- refuses to overwrite an unmanaged local package unless it is already byte-for-byte identical, in which case it adopts it;
-- runs a Home Assistant config check after changing packages;
-- restores the previous package files if that config check fails;
-- retries transient Git/filesystem/state-persistence failures on the next poll without unnecessarily refetching a commit already present locally;
-- optionally restarts Home Assistant after a successful sync when `auto_restart` is enabled.
+- refuses to overwrite an unmanaged local package unless it is a normal file at a non-symlinked path and is already byte-for-byte identical, in which case it adopts it;
+- makes a durable rollback transaction before changing live package files and recovers an interrupted deployment before doing any new work after restart;
+- runs a Home Assistant config check after changing packages and restores the previous package files when a candidate is invalid;
+- retries transient Git, Supervisor, filesystem and state-persistence failures without unnecessarily refetching a commit already present locally;
+- when `auto_restart` is enabled, records the restart requirement durably before considering a deployment complete and retries a failed restart request on later polls.
+
+Home Assistant's directory include helpers load `.yaml` files, so `.yml` files are intentionally not deployed by this app.
 
 The installed local app does not update its own app source. If files under `sync/` change, copy this directory into `/addons` again and rebuild/update the local app.
