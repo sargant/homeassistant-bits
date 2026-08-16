@@ -88,19 +88,32 @@ restore_files() {
     local backup_manifest=$2
     local backup_dir=$3
     local relative_path
+    local failed=0
 
     # Remove anything from the attempted deployment, including newly-added
     # files, then put every pre-existing file back exactly where it was.
     while IFS= read -r relative_path; do
         [ -n "$relative_path" ] || continue
-        rm -f "$DEST_DIR/$relative_path"
+        if ! rm -f "$DEST_DIR/$relative_path"; then
+            bashio::log.error "Rollback could not remove: $relative_path"
+            failed=1
+        fi
     done < "$touched_manifest"
 
     while IFS= read -r relative_path; do
         [ -n "$relative_path" ] || continue
-        mkdir -p "$DEST_DIR/$(dirname "$relative_path")"
-        cp -p "$backup_dir/files/$relative_path" "$DEST_DIR/$relative_path"
+        if ! mkdir -p "$DEST_DIR/$(dirname "$relative_path")"; then
+            bashio::log.error "Rollback could not create parent directory for: $relative_path"
+            failed=1
+            continue
+        fi
+        if ! cp -p "$backup_dir/files/$relative_path" "$DEST_DIR/$relative_path"; then
+            bashio::log.error "Rollback could not restore: $relative_path"
+            failed=1
+        fi
     done < "$backup_manifest"
+
+    return "$failed"
 }
 
 sync_packages() {
@@ -113,6 +126,7 @@ sync_packages() {
     local relative_path
     local source_path
     local target_path
+    local backup_parent
 
     [ -d "$CHECKOUT_DIR/$SOURCE_DIR" ] || {
         bashio::log.error "Repository does not contain $SOURCE_DIR/"
@@ -138,12 +152,24 @@ sync_packages() {
         return 0
     fi
 
-    new_manifest=$(mktemp /data/managed-files.new.XXXXXX)
-    git -C "$CHECKOUT_DIR" ls-files -- "$SOURCE_DIR" \
-        | awk -v prefix="${SOURCE_DIR}/" '$0 ~ /\.ya?ml$/ { sub("^" prefix, ""); print }' \
-        | sort > "$new_manifest"
+    new_manifest=$(mktemp /data/managed-files.new.XXXXXX) || {
+        bashio::log.error "Could not create temporary package manifest"
+        return 1
+    }
 
-    mkdir -p "$DEST_DIR"
+    if ! git -C "$CHECKOUT_DIR" ls-files -- "$SOURCE_DIR" \
+        | awk -v prefix="${SOURCE_DIR}/" '$0 ~ /\.ya?ml$/ { sub("^" prefix, ""); print }' \
+        | sort > "$new_manifest"; then
+        bashio::log.error "Could not build package manifest"
+        rm -f "$new_manifest"
+        return 1
+    fi
+
+    if ! mkdir -p "$DEST_DIR"; then
+        bashio::log.error "Could not create Home Assistant package directory"
+        rm -f "$new_manifest"
+        return 1
+    fi
 
     # Never silently take ownership of a local package. An existing unmanaged
     # file may only be adopted when it is byte-for-byte identical to the Git
@@ -165,63 +191,135 @@ sync_packages() {
         fi
     done < "$new_manifest"
 
-    backup_dir=$(mktemp -d /data/rollback.XXXXXX)
+    backup_dir=$(mktemp -d /data/rollback.XXXXXX) || {
+        bashio::log.error "Could not create rollback directory"
+        rm -f "$new_manifest"
+        return 1
+    }
     touched_manifest="$backup_dir/touched-files.txt"
     backup_manifest="$backup_dir/existing-files.txt"
-    : > "$backup_manifest"
 
-    {
+    if ! : > "$backup_manifest"; then
+        bashio::log.error "Could not create rollback manifest"
+        rm -rf "$backup_dir"
+        rm -f "$new_manifest"
+        return 1
+    fi
+
+    if ! {
         if [ -f "$MANIFEST" ]; then
             cat "$MANIFEST"
         fi
         cat "$new_manifest"
-    } | sort -u > "$touched_manifest"
+    } | sort -u > "$touched_manifest"; then
+        bashio::log.error "Could not build rollback file list"
+        rm -rf "$backup_dir"
+        rm -f "$new_manifest"
+        return 1
+    fi
 
     # Back up every existing file we are about to touch. This includes an
-    # identical unmanaged file being adopted on the first run.
+    # identical unmanaged file being adopted on the first run. The backup must
+    # be complete before any live package is removed or overwritten.
     while IFS= read -r relative_path; do
         [ -n "$relative_path" ] || continue
         target_path="$DEST_DIR/$relative_path"
+
         if [ -e "$target_path" ] && [ ! -f "$target_path" ]; then
             bashio::log.error "Managed path is not a regular file: $relative_path"
             rm -rf "$backup_dir"
             rm -f "$new_manifest"
             return 1
         fi
+
         if [ -f "$target_path" ]; then
-            mkdir -p "$backup_dir/files/$(dirname "$relative_path")"
-            cp -p "$target_path" "$backup_dir/files/$relative_path"
-            printf '%s\n' "$relative_path" >> "$backup_manifest"
+            backup_parent="$backup_dir/files/$(dirname "$relative_path")"
+            if ! mkdir -p "$backup_parent"; then
+                bashio::log.error "Could not create rollback directory for: $relative_path"
+                rm -rf "$backup_dir"
+                rm -f "$new_manifest"
+                return 1
+            fi
+            if ! cp -p "$target_path" "$backup_dir/files/$relative_path"; then
+                bashio::log.error "Could not back up existing package: $relative_path"
+                rm -rf "$backup_dir"
+                rm -f "$new_manifest"
+                return 1
+            fi
+            if ! printf '%s\n' "$relative_path" >> "$backup_manifest"; then
+                bashio::log.error "Could not record rollback entry for: $relative_path"
+                rm -rf "$backup_dir"
+                rm -f "$new_manifest"
+                return 1
+            fi
         fi
     done < "$touched_manifest"
 
     # Remove the previous managed set first so deletions and renames in Git are
     # reflected locally, without touching package files that this app does not
-    # own.
+    # own. Any filesystem failure from this point onward triggers rollback.
     if [ -f "$MANIFEST" ]; then
         while IFS= read -r relative_path; do
             [ -n "$relative_path" ] || continue
-            rm -f "$DEST_DIR/$relative_path"
+            if ! rm -f "$DEST_DIR/$relative_path"; then
+                bashio::log.error "Could not remove previous managed package: $relative_path"
+                if ! restore_files "$touched_manifest" "$backup_manifest" "$backup_dir"; then
+                    bashio::log.error "Rollback also encountered errors"
+                fi
+                rm -rf "$backup_dir"
+                rm -f "$new_manifest"
+                return 1
+            fi
         done < "$MANIFEST"
     fi
 
     while IFS= read -r relative_path; do
         [ -n "$relative_path" ] || continue
-        mkdir -p "$DEST_DIR/$(dirname "$relative_path")"
-        cp -p "$CHECKOUT_DIR/$SOURCE_DIR/$relative_path" "$DEST_DIR/$relative_path"
+
+        if ! mkdir -p "$DEST_DIR/$(dirname "$relative_path")"; then
+            bashio::log.error "Could not create destination directory for: $relative_path"
+            if ! restore_files "$touched_manifest" "$backup_manifest" "$backup_dir"; then
+                bashio::log.error "Rollback also encountered errors"
+            fi
+            rm -rf "$backup_dir"
+            rm -f "$new_manifest"
+            return 1
+        fi
+
+        if ! cp -p "$CHECKOUT_DIR/$SOURCE_DIR/$relative_path" "$DEST_DIR/$relative_path"; then
+            bashio::log.error "Could not deploy package: $relative_path"
+            if ! restore_files "$touched_manifest" "$backup_manifest" "$backup_dir"; then
+                bashio::log.error "Rollback also encountered errors"
+            fi
+            rm -rf "$backup_dir"
+            rm -f "$new_manifest"
+            return 1
+        fi
     done < "$new_manifest"
 
     bashio::log.info "Package YAML changed; checking Home Assistant configuration"
     if ! bashio::core.check; then
         bashio::log.error "Config check failed; restoring the previous package files"
-        restore_files "$touched_manifest" "$backup_manifest" "$backup_dir"
+        if ! restore_files "$touched_manifest" "$backup_manifest" "$backup_dir"; then
+            bashio::log.error "Rollback also encountered errors"
+        fi
         rm -rf "$backup_dir"
         rm -f "$new_manifest"
         return 1
     fi
 
-    mv "$new_manifest" "$MANIFEST"
-    printf '%s\n' "$fingerprint" > "$DEPLOYED_FINGERPRINT"
+    if ! mv "$new_manifest" "$MANIFEST"; then
+        bashio::log.error "Config is valid but managed-file manifest could not be persisted"
+        rm -rf "$backup_dir"
+        return 1
+    fi
+
+    if ! printf '%s\n' "$fingerprint" > "$DEPLOYED_FINGERPRINT"; then
+        bashio::log.error "Config is valid but deployment fingerprint could not be persisted"
+        rm -rf "$backup_dir"
+        return 1
+    fi
+
     rm -rf "$backup_dir"
 
     bashio::log.info "Package sync completed and configuration is valid"
