@@ -39,12 +39,7 @@
 #
 # Notifications use the modern notify.send_message action and target every
 # notify entity carrying the Home Assistant label with ID
-# `Receive push notifications`. Create a label named
-# "Receive push notifications" and assign it to the notify entities that should
-# receive appliance notifications.
-#
-# The finish-notification cost is calculated as completed-cycle kWh multiplied
-# by the current unit rate at the moment the cycle is confirmed finished.
+# `Receive push notifications`.
 #
 # State-machine overview
 # ----------------------
@@ -56,90 +51,69 @@
 #
 # Starting
 #   A rise above 10 W creates a candidate start and opens a 30-second proof
-#   window. Reaching >30 W inside that window promotes it to a real cycle. The
+#   window. Reaching >30 W inside that window confirms a real cycle. The
 #   original candidate timestamp and energy reading are preserved, so the
-#   recorded start remains accurate even though confirmation is retrospective.
+#   recorded start is retrospective even though confirmation happens later.
 #
 # Washing
 #   The default confirmed running phase. Filling, water heating, tumbling,
 #   pumping and rinsing are deliberately collapsed into this one state.
 #
 # Spinning
-#   A sustained motor signature of 100..600 W active power plus >100 var
-#   reactive power for 30 seconds advances the cycle to Spinning. This phase is
-#   latched: later rinsing/tumbling does not move back to Washing.
+#   A continuously true signature of 100..600 W active power plus >100 var
+#   reactive power for 30 seconds advances Washing to Spinning. Spinning is
+#   latched; later rinsing/tumbling does not move back to Washing.
 #
 # Drying
-#   Sustained active power in the 700..1300 W dryer-heater band for 60 seconds
-#   advances Washing or Spinning to Drying. Dry-only programmes can therefore
-#   move directly from Washing (the generic initial phase) to Drying.
+#   Continuous active power in the 700..1300 W dryer-heater band for 60 seconds
+#   advances Washing or Spinning to Drying. Dry-only programmes therefore begin
+#   briefly as Washing, then advance to Drying once the heater signature proves
+#   itself.
 #
 # Cooling
-#   Once Drying has been reached, six continuous minutes without dryer-band
-#   heating while general >10 W activity continues advances to Cooling. The
-#   observed dryer heater normally cycles off for much less than this; the
-#   machine's claimed "10 minute" cool-down lasted roughly 20–25 minutes in the
-#   two captured examples.
+#   Once Drying has been reached, six continuous minutes without dryer-band heat
+#   advances to Cooling. A genuine cycle finish wins much earlier via the
+#   60-second finish confirmation, so Cooling cannot be produced by an appliance
+#   that simply stopped.
 #
 # Finished
-#   A drop to <=10 W during any confirmed running phase creates a candidate
-#   finish. The machine must remain there for 60 seconds. If activity returns,
-#   the candidate is cancelled. If the full window expires, the cycle becomes
-#   Finished but the stored finish timestamp is the original drop below 10 W,
-#   not the later confirmation time.
+#   A drop below 10 W during any confirmed running phase creates a candidate
+#   finish and opens a 60-second confirmation window. Any return above 10 W
+#   cancels it. If the full minute expires, the cycle becomes Finished while the
+#   recorded finish timestamp remains the original drop below 10 W.
 #
 #   Finished remains visible while the appliance is powered on at its normal
 #   ~2–3 W standby level. Falling below 1 W for 60 seconds returns it to Idle.
 #   A new >10 W candidate can also start directly from Finished.
 #
+# Only start and finish use timer helpers because they are lifecycle events whose
+# candidate windows and retrospective timestamps matter. Spinning, Drying and
+# Cooling are informational classifications and use ordinary `for:` template
+# triggers. Those phase confirmations intentionally restart after an HA restart
+# or template reload; at worst the displayed phase advances slightly late.
+#
 # Threshold summary
 # -----------------
-# >10 W                         creates a candidate cycle start
-# >30 W within 30 s               confirms that candidate start
+# >10 W                          creates a candidate cycle start
+# >30 W within 30 s              confirms that candidate start
 # 100..600 W + >100 var for 30 s confirms Spinning
 # 700..1300 W for 60 s           confirms Drying
-# no 700..1300 W heat for 6 min  confirms Cooling, while >10 W activity remains
-# <=10 W for 60 s                confirms cycle finish, backdated to first quiet
+# outside 700..1300 W for 6 min  confirms Cooling once Drying is latched
+# <10 W for 60 s                 confirms cycle finish, backdated to first quiet
 # <1 W for 60 s                  confirms fully idle / switched-off appliance
-#
-# These are deliberately appliance-profile constants rather than a model of
-# every programme. If the washer-dryer is replaced, the intended migration path
-# is to capture a few representative cycles and retune these thresholds rather
-# than redesign the state machine.
 
 
 # -----------------------------------------------------------------------------
 # TIMERS
 # -----------------------------------------------------------------------------
-# Timers represent real confirmation windows. No automation sleeps or waits.
-# `restore: true` lets active timers survive Home Assistant restarts as far as
-# Home Assistant's timer restoration permits.
+# Only lifecycle confirmation windows are persisted as helpers. Phase
+# classification uses `for:` directly on template triggers below.
 timer:
-  # Candidate start gets 30 seconds to prove itself by reaching >30 W.
   washer_dryer_start_confirm:
     name: Washer dryer start confirmation
     duration: "00:00:30"
     restore: true
 
-  # Candidate spin signature must persist for 30 seconds.
-  washer_dryer_spin_confirm:
-    name: Washer dryer spin confirmation
-    duration: "00:00:30"
-    restore: true
-
-  # Candidate dryer-heater signature must persist for 60 seconds.
-  washer_dryer_drying_confirm:
-    name: Washer dryer drying confirmation
-    duration: "00:01:00"
-    restore: true
-
-  # Dryer heat must remain absent for six minutes before Cooling is latched.
-  washer_dryer_cooling_confirm:
-    name: Washer dryer cooling confirmation
-    duration: "00:06:00"
-    restore: true
-
-  # General activity must remain at or below 10 W for 60 seconds to finish.
   washer_dryer_finish_confirm:
     name: Washer dryer finish confirmation
     duration: "00:01:00"
@@ -154,100 +128,62 @@ template:
   # CYCLE STATE MACHINE
   # ---------------------------------------------------------------------------
   # This trigger-based template sensor is both the state machine and the compact
-  # persisted record of cycle bookkeeping. Home Assistant restores the sensor's
-  # previous state and attributes, so timestamps and energy snapshots do not
-  # need separate input helpers.
-  #
-  # Every relevant threshold crossing, timer expiry and Home Assistant/template
-  # startup wakes this block. It calculates `next_state`, performs timer side
-  # effects, then publishes the new state and bookkeeping attributes.
+  # persisted record of cycle bookkeeping. Trigger-based sensors restore their
+  # state and attributes, so timestamps and energy snapshots do not need
+  # separate input helpers.
   - triggers:
-      # General activity threshold. Crossing upward can create a candidate start
-      # or cancel a candidate finish.
+      # Lifecycle activity thresholds.
       - trigger: numeric_state
         entity_id: sensor.kitchen_washer_dryer_socket_power
         above: 10
         id: above_10
 
-      # Stronger activity confirms a candidate start, mirroring the dishwasher
-      # detector's candidate/proof pattern.
       - trigger: numeric_state
         entity_id: sensor.kitchen_washer_dryer_socket_power
         above: 30
         id: above_30
 
-      # Crossing downward creates a candidate finish during a confirmed cycle,
-      # or disproves an unconfirmed candidate start.
       - trigger: numeric_state
         entity_id: sensor.kitchen_washer_dryer_socket_power
         below: 10
         id: below_10
 
-      # Spin active-power lower bound.
-      - trigger: numeric_state
-        entity_id: sensor.kitchen_washer_dryer_socket_power
-        above: 100
-        id: above_100
+      # Phase checkpoints. These are deliberately ordinary `for:` triggers:
+      # phase classification does not need persistent timer helpers.
+      - trigger: template
+        id: spin_confirmed
+        value_template: >-
+          {% set p = states('sensor.kitchen_washer_dryer_socket_power') | float(0) %}
+          {% set q = states('sensor.kitchen_washer_dryer_socket_reactive_power') | float(0) %}
+          {{ is_state('sensor.kitchen_washer_dryer_cycle_state', 'Washing')
+             and 100 < p < 600 and q > 100 }}
+        for: "00:00:30"
 
-      - trigger: numeric_state
-        entity_id: sensor.kitchen_washer_dryer_socket_power
-        below: 100
-        id: below_100
+      - trigger: template
+        id: drying_confirmed
+        value_template: >-
+          {% set p = states('sensor.kitchen_washer_dryer_socket_power') | float(0) %}
+          {{ states('sensor.kitchen_washer_dryer_cycle_state') in ['Washing', 'Spinning']
+             and 700 < p < 1300 }}
+        for: "00:01:00"
 
-      # Spin active-power upper bound.
-      - trigger: numeric_state
-        entity_id: sensor.kitchen_washer_dryer_socket_power
-        above: 600
-        id: above_600
+      - trigger: template
+        id: cooling_confirmed
+        value_template: >-
+          {% set p = states('sensor.kitchen_washer_dryer_socket_power') | float(0) %}
+          {{ is_state('sensor.kitchen_washer_dryer_cycle_state', 'Drying')
+             and not (700 < p < 1300) }}
+        for: "00:06:00"
 
-      - trigger: numeric_state
-        entity_id: sensor.kitchen_washer_dryer_socket_power
-        below: 600
-        id: below_600
-
-      # Reactive-power threshold used to distinguish sustained motor spin from
-      # predominantly resistive heating.
-      - trigger: numeric_state
-        entity_id: sensor.kitchen_washer_dryer_socket_reactive_power
-        above: 100
-        id: reactive_above_100
-
-      - trigger: numeric_state
-        entity_id: sensor.kitchen_washer_dryer_socket_reactive_power
-        below: 100
-        id: reactive_below_100
-
-      # Dryer-heater band lower bound.
-      - trigger: numeric_state
-        entity_id: sensor.kitchen_washer_dryer_socket_power
-        above: 700
-        id: above_700
-
-      - trigger: numeric_state
-        entity_id: sensor.kitchen_washer_dryer_socket_power
-        below: 700
-        id: below_700
-
-      # Dryer-heater band upper bound. Water heating was observed around
-      # 1.6–1.7 kW, safely above this band.
-      - trigger: numeric_state
-        entity_id: sensor.kitchen_washer_dryer_socket_power
-        above: 1300
-        id: above_1300
-
-      - trigger: numeric_state
-        entity_id: sensor.kitchen_washer_dryer_socket_power
-        below: 1300
-        id: below_1300
-
-      # Strong signal that the powered appliance has actually been switched off.
+      # Strong signal that the powered appliance has actually gone to sleep or
+      # been switched off.
       - trigger: numeric_state
         entity_id: sensor.kitchen_washer_dryer_socket_power
         below: 1
         for: "00:01:00"
         id: asleep
 
-      # Confirmation-window expiries.
+      # Lifecycle confirmation-window expiries.
       - trigger: timer.finished
         target:
           entity_id: timer.washer_dryer_start_confirm
@@ -255,42 +191,21 @@ template:
 
       - trigger: timer.finished
         target:
-          entity_id: timer.washer_dryer_spin_confirm
-        id: spin_timeout
-
-      - trigger: timer.finished
-        target:
-          entity_id: timer.washer_dryer_drying_confirm
-        id: drying_timeout
-
-      - trigger: timer.finished
-        target:
-          entity_id: timer.washer_dryer_cooling_confirm
-        id: cooling_timeout
-
-      - trigger: timer.finished
-        target:
           entity_id: timer.washer_dryer_finish_confirm
         id: finish_timeout
 
-      # Reconcile restored state/timers after Home Assistant starts.
+      # Reconcile restored lifecycle state after HA starts or templates reload.
       - trigger: homeassistant
         event: start
         id: startup
 
-      # Template reloads recreate trigger-based sensors before ordinary triggers
-      # fire; handle them like startup so state is immediately sensible.
       - trigger: event
         event_type: event_template_reloaded
         id: startup
 
     actions:
-      # -----------------------------------------------------------------------
-      # CALCULATE CURRENT CONDITIONS AND NEXT STATE
-      # -----------------------------------------------------------------------
       - variables:
-          # Accept only explicit detector states. A first load or invalid state
-          # falls back conservatively to Idle.
+          # Only explicit detector states are accepted on restore.
           s: >-
             {% set previous = states('sensor.kitchen_washer_dryer_cycle_state') %}
             {{ previous if previous in
@@ -298,295 +213,116 @@ template:
                 'Drying', 'Cooling', 'Finished']
                else 'Idle' }}
 
-          # Snapshot source values once so every transition test in this run sees
-          # the same measurements.
           p: "{{ states('sensor.kitchen_washer_dryer_socket_power') | float(0) }}"
-          q: "{{ states('sensor.kitchen_washer_dryer_socket_reactive_power') | float(0) }}"
-
-          # Compound phase signatures.
-          spin_signature: "{{ 100 < (p | float(0)) < 600 and (q | float(0)) > 100 }}"
-          drying_signature: "{{ 700 < (p | float(0)) < 1300 }}"
-          active: "{{ (p | float(0)) > 10 }}"
-          finish_timer_was_idle: "{{ is_state('timer.washer_dryer_finish_confirm', 'idle') }}"
 
           # Decide the next latched lifecycle state. Phase states only advance;
-          # there are deliberately no Spinning -> Washing, Drying -> Spinning or
+          # there are no Spinning -> Washing, Drying -> Spinning or
           # Cooling -> Drying transitions.
           next_state: >-
             {# Idle/Finished -> Starting: possible new programme activity. #}
             {% if trigger.id == 'above_10' and s in ['Idle', 'Finished'] %}
               Starting
 
-            {# Starting -> Washing: stronger >30 W activity arrived inside the
-               30-second proof window, confirming a real cycle. #}
+            {# Starting -> Washing: >30 W arrived inside the proof window. #}
             {% elif trigger.id == 'above_30' and s == 'Starting'
                     and is_state('timer.washer_dryer_start_confirm', 'active') %}
               Washing
 
-            {# If the >30 W crossing was not observed as an event (for example
-               after restart), current >30 W at timeout is still sufficient
-               proof of a real cycle. #}
-            {% elif trigger.id == 'start_timeout' and s == 'Starting'
-                    and (p | float(0)) > 30 %}
+            {# If the timeout arrives while current power is already >30 W,
+               accept the candidate; this mainly covers restoration edge cases. #}
+            {% elif trigger.id == 'start_timeout' and s == 'Starting' and p > 30 %}
               Washing
 
-            {# Otherwise a quieting or expired proof window disproves the
-               candidate and returns to the lifecycle state it came from. #}
+            {# Otherwise a quieting or expired proof window disproves the start. #}
             {% elif trigger.id in ['below_10', 'start_timeout'] and s == 'Starting' %}
-              {{ state_attr('sensor.kitchen_washer_dryer_cycle_state', 'candidate_previous_state') or 'Idle' }}
+              {{ state_attr('sensor.kitchen_washer_dryer_cycle_state',
+                            'candidate_previous_state') or 'Idle' }}
 
-            {# Washing -> Spinning: sustained high-speed motor signature. #}
-            {% elif trigger.id == 'spin_timeout' and s == 'Washing'
-                    and spin_signature | bool %}
+            {# Monotonic phase advances. #}
+            {% elif trigger.id == 'spin_confirmed' and s == 'Washing' %}
               Spinning
 
-            {# Washing/Spinning -> Drying: sustained dryer-heater signature. #}
-            {% elif trigger.id == 'drying_timeout'
-                    and s in ['Washing', 'Spinning']
-                    and drying_signature | bool %}
+            {% elif trigger.id == 'drying_confirmed' and s in ['Washing', 'Spinning'] %}
               Drying
 
-            {# Drying -> Cooling: dryer heat has stayed absent for six minutes
-               while meaningful appliance activity continues. #}
-            {% elif trigger.id == 'cooling_timeout' and s == 'Drying'
-                    and not (drying_signature | bool) and active | bool %}
+            {% elif trigger.id == 'cooling_confirmed' and s == 'Drying' %}
               Cooling
 
-            {# Any confirmed running phase -> Finished: the 60-second quiet
-               checkpoint expired. The timestamp is handled retrospectively in
-               the attributes below. #}
+            {# Any confirmed running phase -> Finished after one quiet minute. #}
             {% elif trigger.id == 'finish_timeout'
                     and s in ['Washing', 'Spinning', 'Drying', 'Cooling']
-                    and (p | float(0)) <= 10 %}
+                    and p < 10 %}
               Finished
 
-            {# Finished -> Idle after the appliance is genuinely asleep/off. #}
+            {# Finished -> Idle only when the appliance genuinely sleeps/off. #}
             {% elif trigger.id == 'asleep' and s == 'Finished' %}
               Idle
 
             {# STARTUP RECONCILIATION --------------------------------------- #}
-            {# A restored Starting state with current >30 W can be confirmed
-               immediately: present power is already the proof we require. #}
-            {% elif trigger.id == 'startup' and s == 'Starting'
-                    and (p | float(0)) > 30 %}
+            {% elif trigger.id == 'startup' and s == 'Starting' and p > 30 %}
               Washing
 
-            {# If HA comes up while an unconfirmed start is no longer active,
-               abandon it and return to its previous lifecycle state. #}
-            {% elif trigger.id == 'startup' and s == 'Starting'
-                    and (p | float(0)) <= 10 %}
-              {{ state_attr('sensor.kitchen_washer_dryer_cycle_state', 'candidate_previous_state') or 'Idle' }}
+            {% elif trigger.id == 'startup' and s == 'Starting' and p < 10 %}
+              {{ state_attr('sensor.kitchen_washer_dryer_cycle_state',
+                            'candidate_previous_state') or 'Idle' }}
 
-            {# A stored Finished state is unnecessary if the appliance is
-               already fully off when HA starts. #}
-            {% elif trigger.id == 'startup' and s == 'Finished'
-                    and (p | float(0)) < 1 %}
+            {% elif trigger.id == 'startup' and s == 'Finished' and p < 1 %}
               Idle
 
-            {# If HA starts/reloads while current power proves a new programme is
-               active but the restored lifecycle is Idle/Finished, begin a fresh
-               conservative candidate from now. We cannot reconstruct activity
-               that happened while HA was unavailable. #}
-            {% elif trigger.id == 'startup' and s in ['Idle', 'Finished']
-                    and (p | float(0)) > 10 %}
+            {# If HA starts while an apparently new cycle is active, begin a
+               fresh candidate. Activity while HA was offline cannot be timed. #}
+            {% elif trigger.id == 'startup' and s in ['Idle', 'Finished'] and p > 10 %}
               Starting
 
-            {# Otherwise keep the current state. #}
             {% else %}
               {{ s }}
             {% endif %}
 
       # -----------------------------------------------------------------------
-      # TIMER SIDE-EFFECTS — CYCLE START / FINISH
+      # TIMER SIDE-EFFECTS — START / FINISH ONLY
       # -----------------------------------------------------------------------
 
-      # A possible new programme starts the 30-second confirmation timer.
+      # New candidate start, or restored Starting state with no active timer.
       - if: >-
           {{ (trigger.id == 'above_10' and s in ['Idle', 'Finished'])
-             or (trigger.id == 'startup' and s in ['Idle', 'Finished']
-                 and (p | float(0)) > 10) }}
+             or (trigger.id == 'startup' and (next_state | trim) == 'Starting'
+                 and p > 10
+                 and is_state('timer.washer_dryer_start_confirm', 'idle')) }}
         then:
           - action: timer.start
             target:
               entity_id: timer.washer_dryer_start_confirm
 
-      # Once Starting is either confirmed by >30 W or disproved by going quiet,
-      # the candidate timer is no longer useful. A timeout has already finished
-      # naturally and therefore needs no cancellation.
+      # A candidate is proved or disproved before its timer expires.
       - if: >-
-          {{ (trigger.id == 'above_30' and s == 'Starting')
-             or (trigger.id == 'startup' and s == 'Starting'
-                 and (p | float(0)) > 30)
-             or (trigger.id == 'below_10' and s == 'Starting') }}
+          {{ (s == 'Starting' and trigger.id == 'above_30')
+             or (s == 'Starting' and trigger.id == 'below_10')
+             or (trigger.id == 'startup' and s == 'Starting' and p > 30) }}
         then:
           - action: timer.cancel
             target:
               entity_id: timer.washer_dryer_start_confirm
 
-      # A confirmed running phase dropping to <=10 W creates the finish window.
+      # A confirmed phase going quiet creates the finish confirmation window.
       - if: >-
-          {{ trigger.id == 'below_10'
-             and s in ['Washing', 'Spinning', 'Drying', 'Cooling'] }}
+          {{ (trigger.id == 'below_10'
+              and s in ['Washing', 'Spinning', 'Drying', 'Cooling'])
+             or (trigger.id == 'startup'
+                 and s in ['Washing', 'Spinning', 'Drying', 'Cooling']
+                 and p < 10
+                 and is_state('timer.washer_dryer_finish_confirm', 'idle')) }}
         then:
           - action: timer.start
             target:
               entity_id: timer.washer_dryer_finish_confirm
 
-      # Any return of meaningful activity cancels the pending finish. The phase
-      # itself never changed, so no state repair is necessary.
+      # Any return of meaningful activity cancels the finish candidate. The
+      # latched phase itself never changed, so no state repair is required.
       - if: >-
           {{ trigger.id == 'above_10'
              and s in ['Washing', 'Spinning', 'Drying', 'Cooling'] }}
         then:
           - action: timer.cancel
-            target:
-              entity_id: timer.washer_dryer_finish_confirm
-
-      # -----------------------------------------------------------------------
-      # TIMER SIDE-EFFECTS — SPINNING
-      # -----------------------------------------------------------------------
-
-      # Whenever one of the spin boundaries changes while we are still Washing,
-      # start confirmation if the complete signature is currently true.
-      - if: >-
-          {{ (((s == 'Washing'
-                 and trigger.id in ['above_100', 'below_600', 'reactive_above_100'])
-                or (s == 'Starting' and next_state | trim == 'Washing'))
-               and spin_signature | bool)
-             or (s == 'Washing' and trigger.id == 'startup'
-                 and spin_signature | bool
-                 and is_state('timer.washer_dryer_spin_confirm', 'idle')) }}
-        then:
-          - action: timer.start
-            target:
-              entity_id: timer.washer_dryer_spin_confirm
-
-      # Leaving any part of the signature before confirmation cancels it.
-      - if: >-
-          {{ s == 'Washing'
-             and trigger.id in ['below_100', 'above_600', 'reactive_below_100']
-             and not (spin_signature | bool) }}
-        then:
-          - action: timer.cancel
-            target:
-              entity_id: timer.washer_dryer_spin_confirm
-
-      # -----------------------------------------------------------------------
-      # TIMER SIDE-EFFECTS — DRYING
-      # -----------------------------------------------------------------------
-
-      # Start drying confirmation whenever we enter the 700..1300 W band while
-      # still in a pre-drying confirmed phase.
-      - if: >-
-          {{ (((s in ['Washing', 'Spinning']
-                 and trigger.id in ['above_700', 'below_1300'])
-                or (s == 'Starting' and next_state | trim == 'Washing'))
-               and drying_signature | bool)
-             or (s in ['Washing', 'Spinning'] and trigger.id == 'startup'
-                 and drying_signature | bool
-                 and is_state('timer.washer_dryer_drying_confirm', 'idle')) }}
-        then:
-          - action: timer.start
-            target:
-              entity_id: timer.washer_dryer_drying_confirm
-
-      # Leaving the dryer band before its full minute disproves that candidate.
-      - if: >-
-          {{ s in ['Washing', 'Spinning']
-             and trigger.id in ['below_700', 'above_1300']
-             and not (drying_signature | bool) }}
-        then:
-          - action: timer.cancel
-            target:
-              entity_id: timer.washer_dryer_drying_confirm
-
-      # -----------------------------------------------------------------------
-      # TIMER SIDE-EFFECTS — COOLING
-      # -----------------------------------------------------------------------
-
-      # Once Drying is latched, leaving the dryer-heater band starts the
-      # six-minute no-heat checkpoint, provided the machine is still active.
-      - if: >-
-          {{ (s == 'Drying'
-              and trigger.id in ['below_700', 'above_1300', 'above_10']
-              and not (drying_signature | bool)
-              and active | bool)
-             or (s == 'Drying' and trigger.id == 'startup'
-                 and not (drying_signature | bool) and active | bool
-                 and is_state('timer.washer_dryer_cooling_confirm', 'idle')) }}
-        then:
-          - action: timer.start
-            target:
-              entity_id: timer.washer_dryer_cooling_confirm
-
-      # Dryer-band heat returning before six minutes cancels Cooling confirmation.
-      - if: >-
-          {{ s == 'Drying'
-             and trigger.id in ['above_700', 'below_1300']
-             and drying_signature | bool }}
-        then:
-          - action: timer.cancel
-            target:
-              entity_id: timer.washer_dryer_cooling_confirm
-
-      # -----------------------------------------------------------------------
-      # CLEAN UP PHASE TIMERS AFTER A LATCHED TRANSITION
-      # -----------------------------------------------------------------------
-      - if: "{{ trigger.id == 'spin_timeout' and next_state | trim == 'Spinning' }}"
-        then:
-          - action: timer.cancel
-            target:
-              entity_id: timer.washer_dryer_spin_confirm
-
-      - if: "{{ trigger.id == 'drying_timeout' and next_state | trim == 'Drying' }}"
-        then:
-          - action: timer.cancel
-            target:
-              entity_id:
-                - timer.washer_dryer_spin_confirm
-                - timer.washer_dryer_drying_confirm
-
-      - if: "{{ trigger.id == 'cooling_timeout' and next_state | trim == 'Cooling' }}"
-        then:
-          - action: timer.cancel
-            target:
-              entity_id: timer.washer_dryer_cooling_confirm
-
-      - if: "{{ trigger.id == 'finish_timeout' and next_state | trim == 'Finished' }}"
-        then:
-          - action: timer.cancel
-            target:
-              entity_id:
-                - timer.washer_dryer_spin_confirm
-                - timer.washer_dryer_drying_confirm
-                - timer.washer_dryer_cooling_confirm
-                - timer.washer_dryer_finish_confirm
-
-      # -----------------------------------------------------------------------
-      # STARTUP TIMER REPAIR
-      # -----------------------------------------------------------------------
-      # Restored timers that actually expired while HA was offline do not emit
-      # historical timer.finished events. Where a confirmation window is still
-      # clearly required from current measurements, restart a fresh full window
-      # rather than guessing how long the condition existed while HA was down.
-
-      - if: >-
-          {{ trigger.id == 'startup' and s == 'Starting'
-             and next_state | trim == 'Starting'
-             and (p | float(0)) > 10
-             and is_state('timer.washer_dryer_start_confirm', 'idle') }}
-        then:
-          - action: timer.start
-            target:
-              entity_id: timer.washer_dryer_start_confirm
-
-      - if: >-
-          {{ trigger.id == 'startup'
-             and s in ['Washing', 'Spinning', 'Drying', 'Cooling']
-             and (p | float(0)) <= 10
-             and finish_timer_was_idle | bool }}
-        then:
-          - action: timer.start
             target:
               entity_id: timer.washer_dryer_finish_confirm
 
@@ -598,83 +334,67 @@ template:
         unique_id: washer_dryer_cycle_state
         default_entity_id: sensor.kitchen_washer_dryer_cycle_state
         icon: mdi:washing-machine
-
         state: "{{ next_state | trim }}"
 
         attributes:
-          # Remember whether a candidate start came from Idle or Finished so a
-          # failed candidate can return to the correct public lifecycle state.
+          # Remember where a candidate start came from, so a failed candidate
+          # returns to Finished rather than incorrectly dropping to Idle.
           candidate_previous_state: >-
-            {% if s in ['Idle', 'Finished'] and next_state | trim == 'Starting' %}
+            {% if s in ['Idle', 'Finished'] and (next_state | trim) == 'Starting' %}
               {{ s }}
             {% else %}
               {{ this.attributes.get('candidate_previous_state') }}
             {% endif %}
 
-          # Candidate start bookkeeping. These are promoted only when >30 W
-          # activity proves the candidate inside its 30-second window.
+          # Capture the first >10 W moment and energy reading. Confirmation later
+          # promotes these values rather than replacing them with the timer time.
           candidate_started_at: >-
-            {% if s in ['Idle', 'Finished'] and next_state | trim == 'Starting' %}
+            {% if s in ['Idle', 'Finished'] and (next_state | trim) == 'Starting' %}
               {{ now().isoformat() }}
             {% else %}
               {{ this.attributes.get('candidate_started_at') }}
             {% endif %}
 
           candidate_start_energy_kwh: >-
-            {% if s in ['Idle', 'Finished'] and next_state | trim == 'Starting' %}
+            {% if s in ['Idle', 'Finished'] and (next_state | trim) == 'Starting' %}
               {{ states('sensor.kitchen_washer_dryer_socket_energy') | float(0) }}
             {% else %}
               {{ this.attributes.get('candidate_start_energy_kwh') }}
             {% endif %}
 
           last_started_at: >-
-            {% if s == 'Starting' and next_state | trim == 'Washing' %}
+            {% if s == 'Starting' and (next_state | trim) == 'Washing' %}
               {{ this.attributes.get('candidate_started_at') }}
             {% else %}
               {{ this.attributes.get('last_started_at') }}
             {% endif %}
 
           last_started_energy_kwh: >-
-            {% if s == 'Starting' and next_state | trim == 'Washing' %}
+            {% if s == 'Starting' and (next_state | trim) == 'Washing' %}
               {{ this.attributes.get('candidate_start_energy_kwh') }}
             {% else %}
               {{ this.attributes.get('last_started_energy_kwh') }}
             {% endif %}
 
-          # Candidate finish is captured at the first drop to <=10 W. The state
-          # remains in its current phase while the 60-second timer runs, so
-          # dashboards continue to say Washing/Spinning/Drying/Cooling until
-          # finish is actually confirmed.
+          # Capture the first <10 W moment. If HA starts in a quiet running phase
+          # with no restored finish timer, the best available candidate is now.
           candidate_finished_at: >-
             {% if trigger.id == 'below_10'
                   and s in ['Washing', 'Spinning', 'Drying', 'Cooling'] %}
               {{ now().isoformat() }}
             {% elif trigger.id == 'startup'
                     and s in ['Washing', 'Spinning', 'Drying', 'Cooling']
-                    and (p | float(0)) <= 10
-                    and finish_timer_was_idle | bool %}
+                    and p < 10
+                    and is_state('timer.washer_dryer_finish_confirm', 'idle') %}
               {{ now().isoformat() }}
             {% else %}
               {{ this.attributes.get('candidate_finished_at') }}
             {% endif %}
 
-          candidate_finish_energy_kwh: >-
-            {% if trigger.id == 'below_10'
-                  and s in ['Washing', 'Spinning', 'Drying', 'Cooling'] %}
-              {{ states('sensor.kitchen_washer_dryer_socket_energy') | float(0) }}
-            {% elif trigger.id == 'startup'
-                    and s in ['Washing', 'Spinning', 'Drying', 'Cooling']
-                    and (p | float(0)) <= 10
-                    and finish_timer_was_idle | bool %}
-              {{ states('sensor.kitchen_washer_dryer_socket_energy') | float(0) }}
-            {% else %}
-              {{ this.attributes.get('candidate_finish_energy_kwh') }}
-            {% endif %}
-
-          # On confirmed finish, promote the original candidate timestamp rather
-          # than the timer expiry. This is the key retrospective-timing rule.
+          # A confirmed finish promotes the original candidate values, preserving
+          # the real finish time despite the 60-second confidence delay.
           last_finished_at: >-
-            {% if next_state | trim == 'Finished'
+            {% if (next_state | trim) == 'Finished'
                   and s in ['Washing', 'Spinning', 'Drying', 'Cooling'] %}
               {{ this.attributes.get('candidate_finished_at') }}
             {% else %}
@@ -682,7 +402,7 @@ template:
             {% endif %}
 
           last_duration_s: >-
-            {% if next_state | trim == 'Finished'
+            {% if (next_state | trim) == 'Finished'
                   and s in ['Washing', 'Spinning', 'Drying', 'Cooling'] %}
               {% set started = this.attributes.get('last_started_at') %}
               {% set finished = this.attributes.get('candidate_finished_at') %}
@@ -696,12 +416,12 @@ template:
             {% endif %}
 
           last_cycle_energy_kwh: >-
-            {% if next_state | trim == 'Finished'
+            {% if (next_state | trim) == 'Finished'
                   and s in ['Washing', 'Spinning', 'Drying', 'Cooling'] %}
               {% set start_energy = this.attributes.get('last_started_energy_kwh') %}
-              {% set finish_energy = this.attributes.get('candidate_finish_energy_kwh') %}
-              {% if start_energy is not none and finish_energy is not none %}
-                {{ ((finish_energy | float(0)) - (start_energy | float(0))) | round(3) }}
+              {% if start_energy is not none %}
+                {{ ((states('sensor.kitchen_washer_dryer_socket_energy') | float(0))
+                    - (start_energy | float(0))) | round(3) }}
               {% else %}
                 {{ this.attributes.get('last_cycle_energy_kwh') }}
               {% endif %}
@@ -712,9 +432,8 @@ template:
   # ---------------------------------------------------------------------------
   # PUBLIC DERIVED ENTITIES
   # ---------------------------------------------------------------------------
-  # These thin views expose only useful time-series concepts. Candidate start is
-  # deliberately hidden until confirmed; candidate finish remains represented
-  # by the current confirmed phase until the 60-second checkpoint completes.
+  # Starting is an internal candidate only. Candidate finish deliberately leaves
+  # the public phase/running state unchanged until its minute is confirmed.
   - binary_sensor:
       - name: Washer dryer running
         unique_id: washer_dryer_running
@@ -732,9 +451,8 @@ template:
         state: >-
           {% set cycle = states('sensor.kitchen_washer_dryer_cycle_state') %}
           {% if cycle == 'Starting' %}
-            {% set previous =
-              state_attr('sensor.kitchen_washer_dryer_cycle_state',
-                         'candidate_previous_state') %}
+            {% set previous = state_attr(
+              'sensor.kitchen_washer_dryer_cycle_state', 'candidate_previous_state') %}
             {{ previous if previous in ['Idle', 'Finished'] else 'Idle' }}
           {% elif cycle in
               ['Idle', 'Washing', 'Spinning', 'Drying', 'Cooling', 'Finished'] %}
@@ -749,7 +467,7 @@ template:
 # -----------------------------------------------------------------------------
 # Notifications use the retrospective timestamps captured above. They therefore
 # arrive after the confidence window but report when activity actually began or
-# ended, rather than when the confirmation timer expired.
+# ended, rather than when confirmation happened.
 automation:
   - id: washer_dryer_started_notification
     alias: Washer dryer started notification
@@ -802,15 +520,10 @@ automation:
 
 # UI footprint
 # ------------
-# The package exposes:
-#
 #   sensor.kitchen_washer_dryer_cycle_state   detailed detector lifecycle
 #   binary_sensor.kitchen_washer_dryer_running confirmed running / not-running
 #   sensor.kitchen_washer_dryer_phase         broad monotonic public phase
 #   timer.washer_dryer_start_confirm
-#   timer.washer_dryer_spin_confirm
-#   timer.washer_dryer_drying_confirm
-#   timer.washer_dryer_cooling_confirm
 #   timer.washer_dryer_finish_confirm
 #
 # Last-start, last-finish, duration and cycle-energy values remain attributes of
