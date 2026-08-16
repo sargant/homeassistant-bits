@@ -1,8 +1,15 @@
 # Package sync
 
-Tiny local Home Assistant app that watches `main` in this repository and deploys only tracked `packages/**/*.yaml` files into Home Assistant's `packages/` directory.
+Tiny local Home Assistant app that watches `main` in this repository and deploys tracked `packages/**/*.yaml` into `/config/packages/synced/`.
 
-It deliberately does **not** turn `/config` into a Git checkout. The private clone lives in the app's `/data`, and only package YAML is copied into Home Assistant.
+The important ownership boundary is simple: **the app owns the whole `packages/synced/` directory and nothing else under `packages/`**. The private Git checkout lives in the app's `/data`; Home Assistant's config directory is never turned into a Git checkout.
+
+This assumes Home Assistant already uses recursive packages, for example:
+
+```yaml
+homeassistant:
+  packages: !include_dir_named packages
+```
 
 ## Install
 
@@ -21,24 +28,23 @@ deployment_key:
   - "-----END OPENSSH PRIVATE KEY-----"
 ```
 
+Before the first successful sync, remove any manually copied package files outside `packages/synced/` that duplicate files from this repository. The app deliberately will not move or delete them for you; duplicate package definitions should fail the Home Assistant config check and roll the attempted sync back.
+
 Start the app and check its logs.
 
 ## Behaviour
 
 - checks only the remote `main` HEAD commit hash every five minutes by default;
 - does not fetch the repository, inspect files or run a Home Assistant check when that HEAD has already been processed;
-- when HEAD changes, fetches the new commit and considers only tracked package YAML;
-- ignores changes outside tracked package YAML, so README/agent/sync-app edits do not cause a Home Assistant deployment;
-- treats removal of the whole `packages/` directory as an empty managed package set, so previously managed files are removed;
-- remembers package content that repeatedly fails Home Assistant validation while the restored baseline remains valid, and does not retry that package fingerprint until package YAML changes;
-- tracks which package files it owns and removes them when they are removed or renamed in Git;
-- never deletes unrelated local package files;
-- refuses to overwrite an unmanaged local package unless it is a normal file at a non-symlinked path and is already byte-for-byte identical, in which case it adopts it;
-- makes a durable rollback transaction before changing live package files and recovers an interrupted deployment before doing any new work after restart;
-- runs a Home Assistant config check after changing packages and restores the previous package files when a candidate is invalid;
-- retries transient Git, Supervisor, filesystem and state-persistence failures without unnecessarily refetching a commit already present locally;
-- when `auto_restart` is enabled, records the restart requirement durably before considering a deployment complete and retries a failed restart request on later polls.
-
-Home Assistant's directory include helpers load `.yaml` files, so `.yml` files are intentionally not deployed by this app.
+- when HEAD changes, fetches the new commit and considers only tracked `.yaml` under this repository's `packages/` directory;
+- ignores repository changes outside package YAML;
+- remembers package content that repeatedly fails Home Assistant validation and does not retry that same package fingerprint until package YAML changes;
+- builds the complete next `packages/synced/` tree before touching the live one;
+- swaps the whole owned directory rather than updating individual files;
+- runs a Home Assistant config check against the candidate directory;
+- restores the previous complete `packages/synced/` tree if validation fails;
+- recovers an interrupted directory swap on the next run before doing any new Git work;
+- never modifies anything else under Home Assistant's `packages/` directory;
+- optionally restarts Home Assistant after a successful sync when `auto_restart` is enabled, and retries a failed restart request.
 
 The installed local app does not update its own app source. If files under `sync/` change, copy this directory into `/addons` again and rebuild/update the local app.
