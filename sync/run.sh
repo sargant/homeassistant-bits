@@ -13,29 +13,40 @@ CHECKOUT=/data/repository
 PROCESSED=/data/processed
 DEPLOYED=/data/deployed
 FAILED=/data/failed
-WORK=/homeassistant/.git-package-sync
-STAGE="$WORK/stage"
-BACKUP="$WORK/backup"
-OLD="$WORK/old"
+WORK_ROOT=/homeassistant/.git-package-sync
 
 case "$REPOSITORY" in https://*) ;; *) bashio::exit.nok "repository must be a public HTTPS Git URL" ;; esac
 case "$AFTER_SYNC" in none|reload|restart) ;; *) bashio::exit.nok "after_sync must be none, reload, or restart" ;; esac
-case "$SOURCE" in ""|/*|.|..|../*|*/../*|*/..|*/.) bashio::exit.nok "source_path must be a relative directory" ;; esac
+case "$SOURCE" in
+    ""|/*|.|..|../*|*/../*|*/..|./*|*/./*|*/.|*//*|*/)
+        bashio::exit.nok "source_path must be a normalized relative Git directory path"
+        ;;
+esac
 
-# The sync target is deliberately one whole, direct child of packages/.
+# Keep the target deliberately narrow: one visible, direct child of packages/.
 case "$DESTINATION" in
     packages/*) NAME=${DESTINATION#packages/} ;;
     *) bashio::exit.nok "destination_path must be a direct child of packages/" ;;
 esac
-case "$NAME" in ""|.|..|*/*) bashio::exit.nok "destination_path must be a direct child of packages/" ;; esac
+case "$NAME" in ""|.|..|.*|*/*) bashio::exit.nok "destination_path must be a visible direct child of packages/" ;; esac
 
 PACKAGES=/homeassistant/packages
+WORK="$WORK_ROOT/$NAME"
+STAGE="$WORK/stage"
+BACKUP="$WORK/backup"
+OLD="$WORK/old"
+DEST="$PACKAGES/$NAME"
+
 if [ -L "$PACKAGES" ] || { [ -e "$PACKAGES" ] && [ ! -d "$PACKAGES" ]; }; then
     bashio::exit.nok "/homeassistant/packages must be a real directory"
 fi
+if [ -L "$WORK_ROOT" ] || { [ -e "$WORK_ROOT" ] && [ ! -d "$WORK_ROOT" ]; }; then
+    bashio::exit.nok "$WORK_ROOT must be a real directory"
+fi
+if [ -L "$WORK" ] || { [ -e "$WORK" ] && [ ! -d "$WORK" ]; }; then
+    bashio::exit.nok "$WORK must be a real directory"
+fi
 mkdir -p "$PACKAGES" "$WORK" || bashio::exit.nok "could not prepare sync directories"
-[ ! -L "$WORK" ] || bashio::exit.nok "$WORK must be a real directory"
-DEST="$PACKAGES/$NAME"
 [ "$INTERVAL" -ge 60 ] || INTERVAL=60
 
 remote_head() {
