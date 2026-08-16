@@ -260,9 +260,12 @@ template:
             {% elif trigger.id == 'finish_timeout' and s == 'End armed' and p < 5 %}
               Finished
 
-            {# Finished -> Idle: after recording completion, wait until the
-               dishwasher has really gone to sleep (<1 W for one minute). #}
-            {% elif trigger.id == 'asleep' and s == 'Finished' %}
+            {# Finished -> Idle: normally the below-1 W trigger supplies this.
+               If the dishwasher was already below 1 W before Finished was
+               reached, the reused finish timer below supplies the same one
+               minute of confirmed idle time. #}
+            {% elif (trigger.id == 'asleep' and s == 'Finished')
+                    or (trigger.id == 'finish_timeout' and s == 'Finished' and p < 1) %}
               Idle
 
             {# STARTUP RECONCILIATION --------------------------------------- #}
@@ -358,6 +361,16 @@ template:
       # If End armed is still above 5 W, wait until it later crosses below 5 W
       # and then begin the same one-minute quiet-period confirmation.
       - if: "{{ trigger.id == 'below_5' and s == 'End armed' }}"
+        then:
+          - action: timer.start
+            target:
+              entity_id: timer.dishwasher_finish_confirm
+
+      # On a programme that simply goes quiet, the below-1 W trigger may have
+      # fired several minutes before we reach Finished. Reuse the same one-minute
+      # timer once more so Finished can still return to Idle without requiring a
+      # fresh power crossing.
+      - if: "{{ trigger.id == 'finish_timeout' and s == 'End armed' and p < 1 }}"
         then:
           - action: timer.start
             target:
