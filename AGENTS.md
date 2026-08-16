@@ -102,8 +102,26 @@ explicitly asked.
 
 ## Git behaviour
 
-Do not create branches, commits, tags, pushes, pull requests, or releases unless
-the user explicitly asks for that Git operation.
+Agents may interact with GitHub directly when making requested repository
+changes. Do not require a separate confirmation merely to create a commit or
+push the requested change.
 
-It is fine to edit files, inspect diffs, run validation, and report working-tree
-changes without committing them.
+Never commit directly to the repository's default branch.
+
+Before the first commit for a piece of work, create a new branch whose name is
+prefixed with `agents/`, for example `agents/dishwasher-drying-phase`.
+
+If the work is already taking place on an existing non-default branch, continue
+using that branch instead of creating another one, even if its name does not
+start with `agents/`.
+
+Commit the requested changes to that branch and push the branch to GitHub.
+
+Do not create, open, or merge a pull request / merge request. Do not merge the
+branch into the default branch.
+
+Do not force-push, rewrite branch history, create tags, or create releases
+unless explicitly asked.
+
+After pushing changes, tell the user which branch was used and briefly describe
+what was committed. Include the commit SHA when it is available.
