@@ -563,10 +563,12 @@ automation:
         target:
           label_id: "{{ label_id('Receive push notifications') }}"
         data:
-          title: Dishwasher started
+          title: 🍽️ Dishwasher started
           message: >-
-            Started at {{ as_datetime(trigger.to_state.attributes.get('last_started_at'))
-            | as_local | timestamp_custom('%H:%M') }}
+            Started at {{
+              as_timestamp(trigger.to_state.attributes.get('last_started_at'))
+              | timestamp_custom('%H:%M')
+            }}
 
   - id: dishwasher_finished_notification
     alias: Dishwasher finished notification
@@ -581,7 +583,7 @@ automation:
         target:
           label_id: "{{ label_id('Receive push notifications') }}"
         data:
-          title: Dishwasher finished
+          title: 🍽️ Dishwasher finished
           message: >-
             {% set duration_s = trigger.to_state.attributes.get('last_duration_s') | int(0) %}
             {% set total_minutes = duration_s // 60 %}
