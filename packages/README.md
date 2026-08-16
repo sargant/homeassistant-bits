@@ -9,10 +9,10 @@ homeassistant:
 
 ## Manual deployment
 
-Run `copy-from-git.sh` from any machine that can SSH to Home Assistant:
+Run `copy-from-github.sh` from any machine that can SSH to Home Assistant:
 
 ```bash
-bash copy-from-git.sh
+bash copy-from-github.sh
 ```
 
 No local Git checkout is used. The script downloads the current `main` branch archive directly from GitHub and streams the contents of its `packages/` directory to `root@assistant:/config/packages/`.
