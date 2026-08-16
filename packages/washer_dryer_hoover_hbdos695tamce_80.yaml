@@ -83,7 +83,7 @@
 #
 # Finished
 #   A drop to <=10 W during any confirmed running phase creates a candidate
-#   finish. The machine must remain there for two minutes. If activity returns,
+#   finish. The machine must remain there for 60 seconds. If activity returns,
 #   the candidate is cancelled. If the full window expires, the cycle becomes
 #   Finished but the stored finish timestamp is the original drop below 10 W,
 #   not the later confirmation time.
@@ -99,7 +99,7 @@
 # 100..600 W + >100 var for 30 s confirms Spinning
 # 700..1300 W for 60 s           confirms Drying
 # no 700..1300 W heat for 6 min  confirms Cooling, while >10 W activity remains
-# <=10 W for 2 min               confirms cycle finish, backdated to first quiet
+# <=10 W for 60 s                confirms cycle finish, backdated to first quiet
 # <1 W for 60 s                  confirms fully idle / switched-off appliance
 #
 # These are deliberately appliance-profile constants rather than a model of
@@ -139,10 +139,10 @@ timer:
     duration: "00:06:00"
     restore: true
 
-  # General activity must remain at or below 10 W for two minutes to finish.
+  # General activity must remain at or below 10 W for 60 seconds to finish.
   washer_dryer_finish_confirm:
     name: Washer dryer finish confirmation
-    duration: "00:02:00"
+    duration: "00:01:00"
     restore: true
 
 
@@ -352,7 +352,7 @@ template:
                     and not (drying_signature | bool) and active | bool %}
               Cooling
 
-            {# Any confirmed running phase -> Finished: the two-minute quiet
+            {# Any confirmed running phase -> Finished: the 60-second quiet
                checkpoint expired. The timestamp is handled retrospectively in
                the attributes below. #}
             {% elif trigger.id == 'finish_timeout'
@@ -642,7 +642,7 @@ template:
             {% endif %}
 
           # Candidate finish is captured at the first drop to <=10 W. The state
-          # remains in its current phase while the two-minute timer runs, so
+          # remains in its current phase while the 60-second timer runs, so
           # dashboards continue to say Washing/Spinning/Drying/Cooling until
           # finish is actually confirmed.
           candidate_finished_at: >-
@@ -714,7 +714,7 @@ template:
   # ---------------------------------------------------------------------------
   # These thin views expose only useful time-series concepts. Candidate start is
   # deliberately hidden until confirmed; candidate finish remains represented
-  # by the current confirmed phase until the two-minute checkpoint completes.
+  # by the current confirmed phase until the 60-second checkpoint completes.
   - binary_sensor:
       - name: Washer dryer running
         unique_id: washer_dryer_running
