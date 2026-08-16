@@ -1,0 +1,25 @@
+---
+name: Home Assistant Bits Sync
+version: "0.1.0"
+slug: homeassistant_bits_sync
+description: Sync this repository's package YAML into Home Assistant
+url: https://github.com/sargant/homeassistant-bits/tree/main/sync
+arch:
+  - aarch64
+  - amd64
+startup: services
+boot: auto
+init: false
+hassio_api: true
+hassio_role: homeassistant
+map:
+  - homeassistant_config:rw
+options:
+  interval: 300
+  auto_restart: false
+  deployment_key: []
+schema:
+  interval: int
+  auto_restart: bool
+  deployment_key:
+    - str
