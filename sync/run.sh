@@ -54,19 +54,46 @@ update_checkout() {
 }
 
 prepare_workdir() {
-    if [ -e "$WORK_ROOT" ]; then
-        [ -d "$WORK_ROOT" ] && [ ! -L "$WORK_ROOT" ] || return 1
-        [ -f "$OWNER" ] && [ ! -L "$OWNER" ] && [ "$(cat "$OWNER")" = "git_package_sync" ] || return 1
-    else
-        mkdir "$WORK_ROOT" || return 1
-        if ! printf 'git_package_sync\n' > "$OWNER"; then
-            rmdir "$WORK_ROOT" 2>/dev/null || true
+    local claim
+
+    # Build a fully marked directory first, then rename it into place. A crash
+    # while creating the claim can only leave an unused temporary directory.
+    if [ ! -e "$WORK_ROOT" ]; then
+        claim=$(mktemp -d /homeassistant/.git-package-sync.claim.XXXXXX) || return 1
+        if ! printf 'git_package_sync\n' > "$claim/.owner"; then
+            rm -rf "$claim"
             return 1
+        fi
+        if [ -e "$WORK_ROOT" ] || ! mv "$claim" "$WORK_ROOT"; then
+            rm -rf "$claim"
         fi
     fi
 
+    [ -d "$WORK_ROOT" ] && [ ! -L "$WORK_ROOT" ] || return 1
+    [ -f "$OWNER" ] && [ ! -L "$OWNER" ] && [ "$(cat "$OWNER")" = "git_package_sync" ] || return 1
     mkdir -p "$WORK" || return 1
     [ -d "$WORK" ] && [ ! -L "$WORK" ]
+}
+
+destination_parent_safe() {
+    local current=/homeassistant relative part
+    local -a parts
+
+    relative=$(dirname "$DESTINATION")
+    [ "$relative" = "." ] && return 0
+
+    IFS='/' read -r -a parts <<< "$relative"
+    for part in "${parts[@]}"; do
+        current="$current/$part"
+        if [ -L "$current" ]; then
+            bashio::log.error "Destination parent contains a symlink: $current"
+            return 1
+        fi
+        if [ -e "$current" ] && [ ! -d "$current" ]; then
+            bashio::log.error "Destination parent is not a directory: $current"
+            return 1
+        fi
+    done
 }
 
 restore_backup() {
@@ -80,7 +107,9 @@ restore_backup() {
 }
 
 recover_swap() {
+    destination_parent_safe || return 1
     mkdir -p "$PARENT" || return 1
+    destination_parent_safe || return 1
     prepare_workdir || return 1
     rm -rf "$STAGE" "$OLD" || return 1
     if [ -e "$BACKUP" ]; then
@@ -100,7 +129,7 @@ build_stage() {
 install_stage() {
     rm -rf "$BACKUP" "$OLD" || return 1
     rm -f "$ABSENT" || return 1
-    if [ -e "$DEST" ]; then
+    if [ -e "$DEST" ] || [ -L "$DEST" ]; then
         [ -d "$DEST" ] && [ ! -L "$DEST" ] || return 1
         mv "$DEST" "$BACKUP" || return 1
     else
@@ -137,11 +166,15 @@ after_sync() {
                 -d '{}' \
                 http://supervisor/core/api/services/homeassistant/reload_all >/dev/null; then
                 bashio::log.error "Home Assistant YAML reload failed"
+                return 1
             fi
             ;;
         restart)
             bashio::log.info "Restarting Home Assistant"
-            bashio::core.restart || bashio::log.error "Home Assistant restart request failed"
+            if ! bashio::core.restart; then
+                bashio::log.error "Home Assistant restart request failed"
+                return 1
+            fi
             ;;
     esac
 }
@@ -177,11 +210,15 @@ sync_once() {
     fi
     [ "$result" -eq 0 ] || return 1
 
+    bashio::log.info "Synced $SOURCE to $DESTINATION"
+    if ! after_sync; then
+        bashio::log.warning "Post-sync action failed; the deployment will be retried"
+        return 1
+    fi
+
     printf '%s\n' "$sync_key" > "$DEPLOYED" || return 1
     rm -f "$FAILED"
     printf '%s\n' "$key" > "$PROCESSED" || return 1
-    bashio::log.info "Synced $SOURCE to $DESTINATION"
-    after_sync
 }
 
 bashio::log.info "Watching $REPOSITORY ($BRANCH) every ${INTERVAL}s"
