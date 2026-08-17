@@ -7,6 +7,4 @@ homeassistant:
   packages: !include_dir_named packages
 ```
 
-`copy-from-github.sh` is a convenience script for the Home Assistant host. It
-copies both the latest `packages/` contents and any `custom_components/` from
-this repository into `/config`.
+A small `copy-from-github.sh` convenience script is included for copying the latest `packages/` contents from GitHub when run on the Home Assistant host.
