@@ -12,8 +12,7 @@ dishwasher.
    Adding it asks no questions and creates the **Dishwasher** entry/device.
 4. Open the integration and choose **Configure**. Select:
    - the smart plug measuring the appliance;
-   - the calibrated appliance algorithm;
-   - the sensor containing the current electricity unit rate.
+   - the calibrated appliance algorithm.
 
 Power and cumulative-energy sensors are discovered automatically from the
 selected smart-plug device.
@@ -21,3 +20,7 @@ selected smart-plug device.
 The only algorithm currently available is **Indesit D2IHL326UK dishwasher**.
 Its thresholds and state machine are intentionally fixed in code rather than
 exposed as tuning options.
+
+The integration only publishes appliance state and cycle facts. Notifications,
+recipient selection, electricity pricing and message formatting belong in normal
+Home Assistant automations outside the integration.
