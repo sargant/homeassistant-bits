@@ -61,7 +61,8 @@ class CalibratedApplianceMonitorOptionsFlow(OptionsFlowWithReload):
         if user_input is not None:
             monitor_type = ALGORITHMS[user_input[CONF_ALGORITHM]]
             self.hass.config_entries.async_update_entry(
-                self.config_entry, title=monitor_type.appliance_name
+                self.config_entry,
+                title=f"{monitor_type.manufacturer} {monitor_type.model}",
             )
             return self.async_create_entry(data=user_input)
 
