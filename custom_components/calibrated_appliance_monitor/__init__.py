@@ -9,7 +9,7 @@ from homeassistant.components.sensor import SensorDeviceClass
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityStateAttribute, Platform, STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import CALLBACK_TYPE, Event, EventStateChangedData, HomeAssistant, State, callback
-from homeassistant.helpers import entity_registry as er, label_registry as lr
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.event import async_call_later, async_track_state_change_event
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
@@ -21,7 +21,6 @@ from .const import (
     ASLEEP_W,
     CONF_ALGORITHM,
     CONF_SOURCE_DEVICE,
-    CONF_UNIT_RATE_ENTITY,
     DOMAIN,
     ENDING,
     END_WINDOW,
@@ -29,7 +28,6 @@ from .const import (
     FINISH_CONFIRM,
     FINISH_PENDING,
     IDLE,
-    NOTIFY_LABEL,
     RUNNING,
     RUNNING_STATES,
     STARTING,
@@ -79,7 +77,6 @@ class DishwasherMonitor:
 
         self.source_device_id = entry.options.get(CONF_SOURCE_DEVICE)
         self.algorithm = entry.options.get(CONF_ALGORITHM)
-        self.unit_rate_entity_id = entry.options.get(CONF_UNIT_RATE_ENTITY)
         self.power_entity_id: str | None = None
         self.energy_entity_id: str | None = None
         self.available = False
@@ -231,7 +228,6 @@ class DishwasherMonitor:
                 self.last_started_energy_kwh = self.candidate_start_energy_kwh
                 self._cancel("start")
                 self._set_state(RUNNING)
-                self._notify_started()
             elif self.state in (RUNNING, ENDING, FINISH_PENDING):
                 self._cancel("end")
                 self._cancel("finish")
@@ -244,7 +240,6 @@ class DishwasherMonitor:
                 self.last_started_at = self.candidate_started_at
                 self.last_started_energy_kwh = self.candidate_start_energy_kwh
                 self._set_state(RUNNING)
-                self._notify_started()
             elif self._has_future_deadline("start"):
                 self._schedule("start", START_CONFIRM, self._start_timeout, resume=True)
             else:
@@ -341,7 +336,6 @@ class DishwasherMonitor:
             self.last_cycle_energy_kwh = round(energy - self.last_started_energy_kwh, 3)
 
         self._set_state(FINISHED)
-        self._notify_finished()
 
     @callback
     def _asleep_timeout(self, _now: datetime) -> None:
@@ -373,36 +367,3 @@ class DishwasherMonitor:
     def _changed(self) -> None:
         for listener in tuple(self.listeners):
             listener()
-
-    def _notify_started(self) -> None:
-        if self.last_started_at:
-            started = datetime.fromisoformat(self.last_started_at)
-            self._notify("🍽️ Dishwasher started", f"Started at {started:%H:%M}")
-
-    def _notify_finished(self) -> None:
-        minutes = (self.last_duration_s or 0) // 60
-        duration = f"{minutes // 60}h{minutes % 60}m" if minutes >= 60 else f"{minutes}m"
-        energy = self.last_cycle_energy_kwh or 0.0
-        rate = (
-            self._number(self.hass.states.get(self.unit_rate_entity_id))
-            if self.unit_rate_entity_id
-            else None
-        )
-        cost = f"£{energy * rate:.2f}" if rate is not None else "cost unavailable"
-        self._notify(
-            "🍽️ Dishwasher finished",
-            f"{duration} • {energy:.2f}kWh • {cost}",
-        )
-
-    def _notify(self, title: str, message: str) -> None:
-        label = lr.async_get(self.hass).async_get_label_by_name(NOTIFY_LABEL)
-        if label:
-            self.entry.async_create_task(
-                self.hass,
-                self.hass.services.async_call(
-                    "notify",
-                    "send_message",
-                    {"title": title, "message": message},
-                    target={"label_id": label.label_id},
-                ),
-            )
