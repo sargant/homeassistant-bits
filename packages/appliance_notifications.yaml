@@ -1,0 +1,35 @@
+# Appliance notifications
+#
+# Household-specific notification policy for appliance monitors. Detection stays
+# in the appliance integration; this package decides when and how to notify.
+#
+# The Calibrated Appliance Monitor creates the default cycle-state entity:
+#   sensor.dishwasher_cycle_state
+#
+# The electricity unit-rate entity remains installation-specific because it is
+# used only to format the finished notification, not to detect the cycle.
+
+automation:
+  - id: dishwasher_finished_notification
+    alias: Dishwasher finished notification
+    description: Notify labelled push targets when the monitored dishwasher finishes.
+    triggers:
+      - trigger: state
+        entity_id: sensor.dishwasher_cycle_state
+        to: "Finished"
+    actions:
+      - action: notify.send_message
+        target:
+          label_id: "{{ label_id('Receive push notifications') }}"
+        data:
+          title: 🍽️ Dishwasher finished
+          message: >-
+            {% set duration_s = trigger.to_state.attributes.get('last_duration_s') | int(0) %}
+            {% set total_minutes = duration_s // 60 %}
+            {% set hours = total_minutes // 60 %}
+            {% set minutes = total_minutes % 60 %}
+            {% set duration = (hours ~ 'h' if hours > 0 else '') ~ minutes ~ 'm' %}
+            {% set energy = trigger.to_state.attributes.get('last_cycle_energy_kwh') | float(0) %}
+            {% set rate = states('sensor.octopus_energy_electricity_15p0128357_1640000213346_current_rate') %}
+            {% set cost = energy * (rate | float(0)) if is_number(rate) else none %}
+            {{ duration }} • {{ '%.2f' | format(energy) }}kWh • {{ ('£%.2f' | format(cost)) if cost is not none else 'cost unavailable' }}
