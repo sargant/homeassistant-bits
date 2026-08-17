@@ -1,4 +1,4 @@
-"""Calibrated Appliance Monitor."""
+"""Calibrated Appliance Monitor runtime."""
 
 from collections.abc import Callable
 from datetime import datetime, timedelta
@@ -58,13 +58,26 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 class DishwasherMonitor:
-    """Power-profile detector calibrated for the Indesit D2IHL326UK."""
+    """Power-profile detector calibrated for the Indesit D2IHL326UK.
+
+    The state machine is deliberately simple and mirrors the proven YAML:
+
+    Idle -> Starting -> Running -> Ending -> Finish pending -> Finished -> Idle
+
+    A >5 W rise creates a candidate start. Reaching >30 W within six minutes
+    confirms it and backdates the real start to that candidate time. During a
+    confirmed cycle, 15 continuous minutes below 30 W arms the end sequence.
+    After the final activity, one minute below 5 W confirms completion, and one
+    minute below 1 W returns the appliance from Finished to Idle.
+    """
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         self.hass = hass
         self.entry = entry
         self.store = Store(hass, 1, f"{DOMAIN}.{entry.entry_id}")
 
+        # Cycle facts are persisted independently of the entities that expose
+        # them, so an HA restart does not erase an in-progress or previous cycle.
         self.state = IDLE
         self.candidate_started_at: str | None = None
         self.candidate_start_energy_kwh: float | None = None
@@ -109,6 +122,8 @@ class DishwasherMonitor:
             _LOGGER.warning("Unsupported calibrated appliance algorithm: %s", self.algorithm)
             return
 
+        # The user selects the smart-plug device, not individual entities. Find
+        # its power and cumulative-energy sensors by device class at runtime.
         self._find_source_entities()
         if not self.power_entity_id:
             _LOGGER.warning("Selected dishwasher source has no power sensor")
@@ -203,38 +218,63 @@ class DishwasherMonitor:
 
         now = dt_util.now()
 
+        # A running dishwasher can spend several minutes at low power. Only
+        # 15 continuous minutes below 30 W are strong enough evidence to arm
+        # the end sequence; any renewed >30 W activity cancels this window.
         if old >= ACTIVE_W > new and self.state == RUNNING:
             self._schedule("end", END_WINDOW, self._end_timeout)
+
+        # Once final activity has happened, require a full minute below 5 W
+        # before declaring the cycle finished. This avoids reporting the end on
+        # a short pause and lets us backdate the finish to the start of the pause.
         if old >= START_W > new and self.state == FINISH_PENDING:
             self._schedule("finish", FINISH_CONFIRM, self._finish_timeout)
+
+        # Finished is deliberately sticky while the appliance is still awake.
+        # A minute below 1 W means the control electronics have gone properly idle.
         if old >= ASLEEP_W > new:
             self._schedule("asleep", ASLEEP_CONFIRM, self._asleep_timeout, persist=False)
 
         if old < ASLEEP_W <= new:
             self._cancel("asleep")
+
         if old <= START_W < new:
             if self.state == IDLE:
+                # >5 W is only a candidate start. Record the earliest plausible
+                # timestamp and energy now, then wait for convincing >30 W load.
                 self.candidate_started_at = now.isoformat()
                 self.candidate_start_energy_kwh = self._energy()
                 self._set_state(STARTING)
                 self._schedule("start", START_CONFIRM, self._start_timeout)
             elif self.state == ENDING:
+                # The observed programme has a final burst after its long quiet
+                # period. Seeing it moves us to the final confirmation stage.
                 self._set_state(FINISH_PENDING)
             elif self.state == FINISH_PENDING:
+                # The dishwasher woke again during the one-minute finish check.
                 self._cancel("finish")
+
         if old <= ACTIVE_W < new:
             if self.state == STARTING and "start" in self.timers:
+                # Strong activity confirms the candidate. Keep its original
+                # timestamp/energy rather than reporting confirmation six minutes late.
                 self.last_started_at = self.candidate_started_at
                 self.last_started_energy_kwh = self.candidate_start_energy_kwh
                 self._cancel("start")
                 self._set_state(RUNNING)
             elif self.state in (RUNNING, ENDING, FINISH_PENDING):
+                # Any renewed >30 W activity proves the cycle is still running.
                 self._cancel("end")
                 self._cancel("finish")
                 self._set_state(RUNNING)
 
     def _startup(self, power: float) -> None:
-        """Recreate the YAML package's conservative restart behaviour."""
+        """Reconcile persisted detector state with live power after a restart.
+
+        We deliberately prefer false negatives over inventing a cycle. Pending
+        timers are resumed when their persisted deadline is still meaningful;
+        otherwise the current power reading determines the safest state.
+        """
         if self.state == STARTING:
             if power > ACTIVE_W:
                 self.last_started_at = self.candidate_started_at
@@ -288,6 +328,9 @@ class DishwasherMonitor:
             except ValueError:
                 pass
 
+        # Start/end/finish windows survive HA restarts. The asleep debounce is
+        # intentionally ephemeral because losing it merely leaves Finished set
+        # until the next qualifying idle observation.
         if persist:
             self.deadlines[name] = deadline.isoformat()
             self._save()
@@ -314,12 +357,15 @@ class DishwasherMonitor:
 
     @callback
     def _start_timeout(self, _now: datetime) -> None:
+        # The >5 W candidate never developed into convincing programme load.
         if self.state == STARTING:
             self._set_state(IDLE)
 
     @callback
     def _end_timeout(self, _now: datetime) -> None:
         if self.state == RUNNING and self.power is not None and self.power < ACTIVE_W:
+            # If we are still above 5 W, the final burst is already under way;
+            # otherwise wait in Ending for that burst to appear.
             self._set_state(FINISH_PENDING if self.power > START_W else ENDING)
 
     @callback
@@ -327,6 +373,9 @@ class DishwasherMonitor:
         if self.state != FINISH_PENDING or self.power is None or self.power >= START_W:
             return
 
+        # Confirmation happens one minute after the real finish. Backdate the
+        # timestamp so duration and downstream notifications describe the cycle,
+        # not the detector's deliberate confirmation delay.
         finished = dt_util.now() - timedelta(seconds=FINISH_CONFIRM)
         self.last_finished_at = finished.isoformat()
         if self.last_started_at:
