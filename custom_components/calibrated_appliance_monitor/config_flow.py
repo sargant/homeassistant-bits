@@ -12,13 +12,27 @@ from homeassistant.config_entries import (
     OptionsFlowWithReload,
 )
 from homeassistant.core import callback
-from homeassistant.helpers.selector import DeviceSelector
+from homeassistant.helpers.selector import (
+    DeviceSelector,
+    EntitySelector,
+    EntitySelectorConfig,
+    SelectSelector,
+    SelectSelectorConfig,
+)
 
-from .const import APPLIANCE_ID, APPLIANCE_NAME, CONF_SOURCE_DEVICE, DOMAIN
+from .const import (
+    ALGORITHM_INDESIT_D2IHL326UK,
+    APPLIANCE_ID,
+    APPLIANCE_NAME,
+    CONF_ALGORITHM,
+    CONF_SOURCE_DEVICE,
+    CONF_UNIT_RATE_ENTITY,
+    DOMAIN,
+)
 
 
 class CalibratedApplianceMonitorConfigFlow(ConfigFlow, domain=DOMAIN):
-    """Add the fixed dishwasher monitor."""
+    """Add the appliance monitor."""
 
     VERSION = 1
 
@@ -33,21 +47,38 @@ class CalibratedApplianceMonitorConfigFlow(ConfigFlow, domain=DOMAIN):
     @staticmethod
     @callback
     def async_get_options_flow(config_entry: ConfigEntry) -> OptionsFlow:
-        """Configure the source after the integration has been added."""
+        """Configure the source and calibration after the integration is added."""
         return CalibratedApplianceMonitorOptionsFlow()
 
 
 class CalibratedApplianceMonitorOptionsFlow(OptionsFlowWithReload):
-    """Select the smart plug feeding the detector."""
+    """Select the inputs used by the detector."""
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Select the source smart plug."""
+        """Select the source device, algorithm and electricity unit rate."""
         if user_input is not None:
             return self.async_create_entry(data=user_input)
 
-        schema = vol.Schema({vol.Required(CONF_SOURCE_DEVICE): DeviceSelector()})
+        schema = vol.Schema(
+            {
+                vol.Required(CONF_SOURCE_DEVICE): DeviceSelector(),
+                vol.Required(CONF_ALGORITHM): SelectSelector(
+                    SelectSelectorConfig(
+                        options=[
+                            {
+                                "value": ALGORITHM_INDESIT_D2IHL326UK,
+                                "label": "Indesit D2IHL326UK dishwasher",
+                            }
+                        ]
+                    )
+                ),
+                vol.Required(CONF_UNIT_RATE_ENTITY): EntitySelector(
+                    EntitySelectorConfig(filter={"domain": "sensor"})
+                ),
+            }
+        )
         return self.async_show_form(
             step_id="init",
             data_schema=self.add_suggested_values_to_schema(
