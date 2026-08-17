@@ -3,7 +3,6 @@
 DOMAIN = "calibrated_appliance_monitor"
 CONF_SOURCE_DEVICE = "source_device"
 CONF_ALGORITHM = "algorithm"
-CONF_UNIT_RATE_ENTITY = "unit_rate_entity"
 
 ALGORITHM_INDESIT_D2IHL326UK = "indesit_d2ihl326uk"
 
@@ -27,5 +26,3 @@ START_CONFIRM = 6 * 60
 END_WINDOW = 15 * 60
 FINISH_CONFIRM = 60
 ASLEEP_CONFIRM = 60
-
-NOTIFY_LABEL = "Receive push notifications"
