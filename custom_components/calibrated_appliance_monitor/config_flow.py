@@ -14,8 +14,6 @@ from homeassistant.config_entries import (
 from homeassistant.core import callback
 from homeassistant.helpers.selector import (
     DeviceSelector,
-    EntitySelector,
-    EntitySelectorConfig,
     SelectSelector,
     SelectSelectorConfig,
 )
@@ -26,7 +24,6 @@ from .const import (
     APPLIANCE_NAME,
     CONF_ALGORITHM,
     CONF_SOURCE_DEVICE,
-    CONF_UNIT_RATE_ENTITY,
     DOMAIN,
 )
 
@@ -57,7 +54,7 @@ class CalibratedApplianceMonitorOptionsFlow(OptionsFlowWithReload):
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Select the source device, algorithm and electricity unit rate."""
+        """Select the source device and calibrated algorithm."""
         if user_input is not None:
             return self.async_create_entry(data=user_input)
 
@@ -73,9 +70,6 @@ class CalibratedApplianceMonitorOptionsFlow(OptionsFlowWithReload):
                             }
                         ]
                     )
-                ),
-                vol.Required(CONF_UNIT_RATE_ENTITY): EntitySelector(
-                    EntitySelectorConfig(filter={"domain": "sensor"})
                 ),
             }
         )
