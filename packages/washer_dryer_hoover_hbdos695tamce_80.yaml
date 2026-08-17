@@ -247,16 +247,23 @@ template:
           power_raw: "{{ states('sensor.kitchen_washer_dryer_socket_power') }}"
           p: "{{ power_raw | float(0) }}"
 
+          # Actions are coordinator-level and can run before the sensor itself is
+          # recreated on a template reload, so read restored attributes by entity
+          # ID rather than using the entity-only `this` variable here.
           # Remember the state that a false start should return to. A candidate
           # can begin from either Idle or the powered-on Finished state.
           candidate_previous_state: >-
-            {% set previous = this.attributes.get('candidate_previous_state') %}
+            {% set previous = state_attr(
+              'sensor.kitchen_washer_dryer_cycle_state',
+              'candidate_previous_state') %}
             {{ previous if previous in ['Idle', 'Finished'] else 'Idle' }}
 
           # Finish pending temporarily hides the real programme phase. Keep it
           # available so renewed activity can restore the exact previous phase.
           finish_pending_from: >-
-            {% set previous = this.attributes.get('finish_pending_from') %}
+            {% set previous = state_attr(
+              'sensor.kitchen_washer_dryer_cycle_state',
+              'finish_pending_from') %}
             {{ previous if previous in ['Washing', 'Spinning', 'Drying', 'Cooling']
                else 'Washing' }}
 
