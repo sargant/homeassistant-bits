@@ -238,6 +238,8 @@ class DishwasherMonitor:
                 self.last_started_energy_kwh = self.candidate_start_energy_kwh
                 self._set_state(RUNNING)
                 self._notify_started()
+            elif self._has_future_deadline("start"):
+                self._schedule("start", START_CONFIRM, self._start_timeout, resume=True)
             else:
                 self._set_state(IDLE)
         elif self.state == RUNNING and power < ACTIVE_W:
@@ -254,6 +256,15 @@ class DishwasherMonitor:
                 self._schedule("finish", FINISH_CONFIRM, self._finish_timeout, resume=True)
         elif self.state == FINISHED and power < ASLEEP_W:
             self._set_state(IDLE)
+
+    def _has_future_deadline(self, name: str) -> bool:
+        saved = self.deadlines.get(name)
+        if not saved:
+            return False
+        try:
+            return datetime.fromisoformat(saved) > dt_util.now()
+        except ValueError:
+            return False
 
     def _schedule(
         self,
@@ -350,7 +361,7 @@ class DishwasherMonitor:
             "last_cycle_energy_kwh": self.last_cycle_energy_kwh,
             "deadlines": self.deadlines,
         }
-        self.hass.async_create_task(self.store.async_save(data))
+        self.entry.async_create_task(self.hass, self.store.async_save(data))
 
     def _changed(self) -> None:
         for listener in tuple(self.listeners):
@@ -375,11 +386,12 @@ class DishwasherMonitor:
     def _notify(self, title: str, message: str) -> None:
         label = lr.async_get(self.hass).async_get_label_by_name(NOTIFY_LABEL)
         if label:
-            self.hass.async_create_task(
+            self.entry.async_create_task(
+                self.hass,
                 self.hass.services.async_call(
                     "notify",
                     "send_message",
                     {"title": title, "message": message},
                     target={"label_id": label.label_id},
-                )
+                ),
             )
