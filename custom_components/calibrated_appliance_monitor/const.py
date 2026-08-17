@@ -2,6 +2,10 @@
 
 DOMAIN = "calibrated_appliance_monitor"
 CONF_SOURCE_DEVICE = "source_device"
+CONF_ALGORITHM = "algorithm"
+CONF_UNIT_RATE_ENTITY = "unit_rate_entity"
+
+ALGORITHM_INDESIT_D2IHL326UK = "indesit_d2ihl326uk"
 
 APPLIANCE_ID = "dishwasher_indesit_d2ihl326uk"
 APPLIANCE_NAME = "Dishwasher"
@@ -25,6 +29,3 @@ FINISH_CONFIRM = 60
 ASLEEP_CONFIRM = 60
 
 NOTIFY_LABEL = "Receive push notifications"
-UNIT_RATE_ENTITY = (
-    "sensor.octopus_energy_electricity_15p0128357_1640000213346_current_rate"
-)
