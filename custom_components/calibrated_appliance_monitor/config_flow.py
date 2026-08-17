@@ -18,58 +18,47 @@ from homeassistant.helpers.selector import (
     SelectSelectorConfig,
 )
 
-from .const import (
-    ALGORITHM_INDESIT_D2IHL326UK,
-    APPLIANCE_ID,
-    APPLIANCE_NAME,
-    CONF_ALGORITHM,
-    CONF_SOURCE_DEVICE,
-    DOMAIN,
-)
+from .algorithms import ALGORITHMS, ALGORITHM_OPTIONS
+from .const import CONF_ALGORITHM, CONF_SOURCE_DEVICE, DOMAIN
 
 
 class CalibratedApplianceMonitorConfigFlow(ConfigFlow, domain=DOMAIN):
-    """Add the appliance monitor."""
+    """Add an empty appliance monitor entry."""
 
     VERSION = 1
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Create the entry without a setup form."""
-        await self.async_set_unique_id(APPLIANCE_ID)
-        self._abort_if_unique_id_configured()
-        return self.async_create_entry(title=APPLIANCE_NAME, data={})
+        """Create an entry without asking setup questions."""
+        return self.async_create_entry(title="Calibrated Appliance Monitor", data={})
 
     @staticmethod
     @callback
     def async_get_options_flow(config_entry: ConfigEntry) -> OptionsFlow:
-        """Configure the source and calibration after the integration is added."""
+        """Configure the source device and calibrated algorithm afterwards."""
         return CalibratedApplianceMonitorOptionsFlow()
 
 
 class CalibratedApplianceMonitorOptionsFlow(OptionsFlowWithReload):
-    """Select the inputs used by the detector."""
+    """Select the source device and algorithm for one appliance entry."""
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Select the source device and calibrated algorithm."""
+        """Configure one monitored appliance."""
         if user_input is not None:
+            monitor_type = ALGORITHMS[user_input[CONF_ALGORITHM]]
+            self.hass.config_entries.async_update_entry(
+                self.config_entry, title=monitor_type.appliance_name
+            )
             return self.async_create_entry(data=user_input)
 
         schema = vol.Schema(
             {
                 vol.Required(CONF_SOURCE_DEVICE): DeviceSelector(),
                 vol.Required(CONF_ALGORITHM): SelectSelector(
-                    SelectSelectorConfig(
-                        options=[
-                            {
-                                "value": ALGORITHM_INDESIT_D2IHL326UK,
-                                "label": "Indesit D2IHL326UK dishwasher",
-                            }
-                        ]
-                    )
+                    SelectSelectorConfig(options=ALGORITHM_OPTIONS)
                 ),
             }
         )
