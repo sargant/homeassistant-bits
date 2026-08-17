@@ -18,14 +18,15 @@ Home Assistant device. Appliance-specific thresholds and state machines live in
    - the smart plug measuring the appliance;
    - the calibrated appliance algorithm.
 
-After configuration, the entry is named for the appliance and the integration
-creates its virtual device. Power and cumulative-energy sensors are discovered
-automatically from the selected smart-plug device.
+After configuration, the entry is named for the selected appliance model and the
+integration creates its logical appliance device. Power and cumulative-energy
+sensors are discovered automatically from the selected smart-plug device.
 
 The public dishwasher surface is deliberately small: **Phase**, **Running**,
-**Last started**, **Last finished**, and **Last cycle energy**. Candidate
-detection remains private until it is confirmed, so the public appliance stays
-Idle / not running during the dishwasher's `Starting` detector state.
+**Last started**, **Last finished**, and **Last cycle energy**. A `Starting`
+candidate immediately appears publicly as Running, matching the original YAML
+helpers, while **Last started** is populated only once >30 W confirms the cycle
+and retains the retrospective candidate timestamp.
 
 Algorithm internals are exposed separately as disabled-by-default diagnostic
 entities. For the dishwasher these currently include **Cycle state**,
