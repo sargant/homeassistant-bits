@@ -27,7 +27,7 @@ RUNNING = "Running"
 ENDING = "Ending"
 FINISH_PENDING = "Finish pending"
 FINISHED = "Finished"
-RUNNING_STATES = {RUNNING, ENDING, FINISH_PENDING}
+RUNNING_STATES = {STARTING, RUNNING, ENDING, FINISH_PENDING}
 
 # Calibrated from recorded cycles for this specific dishwasher.
 START_W = 5.0
@@ -84,19 +84,15 @@ class IndesitD2IHL326UKMonitor(ApplianceMonitor):
 
     @property
     def running(self) -> bool:
-        # Starting is only an unconfirmed candidate. The public running flag
-        # turns on once the algorithm has proved that a real cycle is underway.
+        # Match the original YAML helper semantics: a candidate start is useful
+        # immediately even though its official timestamp is confirmed later.
         return self.state in RUNNING_STATES
 
     @property
     def phase(self) -> str:
-        # Keep candidate detection private: until >30 W confirms the cycle, the
-        # user-facing appliance phase remains Idle.
-        if self.state in (IDLE, STARTING):
-            return IDLE
-        if self.state == FINISHED:
-            return FINISHED
-        return RUNNING
+        # Public phase is responsive from the first plausible sign of a cycle;
+        # the detailed Starting/Ending/Finish pending lifecycle stays diagnostic.
+        return self.state if self.state in (IDLE, FINISHED) else RUNNING
 
     @property
     def attributes(self) -> dict[str, Any]:
