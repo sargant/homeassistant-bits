@@ -1,10 +1,5 @@
 {
   "title": "Calibrated Appliance Monitor",
-  "config": {
-    "abort": {
-      "already_configured": "The appliance monitor is already configured."
-    }
-  },
   "options": {
     "step": {
       "init": {
