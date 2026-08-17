@@ -22,6 +22,17 @@ After configuration, the entry is named for the appliance and the integration
 creates its virtual device. Power and cumulative-energy sensors are discovered
 automatically from the selected smart-plug device.
 
+The public dishwasher surface is deliberately small: **Phase**, **Running**,
+**Last started**, **Last finished**, and **Last cycle energy**. Candidate
+detection remains private until it is confirmed, so the public appliance stays
+Idle / not running during the dishwasher's `Starting` detector state.
+
+Algorithm internals are exposed separately as disabled-by-default diagnostic
+entities. For the dishwasher these currently include **Cycle state**,
+**Candidate started**, **Candidate start energy**, and **Cycle start energy**.
+They are useful while calibrating or debugging the detector but are not required
+for normal automations or notifications.
+
 The only algorithm currently available is **Indesit D2IHL326UK dishwasher**.
 Its thresholds and state machine are intentionally fixed in its algorithm module
 rather than exposed as tuning options.
