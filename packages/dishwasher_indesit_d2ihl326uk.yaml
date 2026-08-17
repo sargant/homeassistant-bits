@@ -12,7 +12,7 @@
 #
 # Installation / search-and-replace
 # ---------------------------------
-# This package has three installation-specific source entities. Before using it
+# This package has two installation-specific source entities. Before using it
 # elsewhere, search and replace each complete entity ID throughout this file:
 #
 # Instantaneous power (W):
@@ -21,17 +21,6 @@
 # Cumulative energy usage (kWh):
 #   sensor.kitchen_dishwasher_socket_energy
 #
-# Current electricity unit rate (GBP/kWh):
-#   sensor.octopus_energy_electricity_15p0128357_1640000213346_current_rate
-#
-# Notifications use the modern notify.send_message action and target every
-# notify entity carrying the Home Assistant label with ID `Receive push notifications`.
-# Create a label named "Receive push notifications" and assign it to the notify entities
-# that should receive appliance-finished notifications.
-#
-# The finish-notification cost is calculated as completed-cycle kWh multiplied
-# by the current unit rate at the moment the cycle finishes.
-#
 # Input entities
 # --------------
 # Instantaneous power:
@@ -39,9 +28,6 @@
 #
 # Cumulative energy:
 #   sensor.kitchen_dishwasher_socket_energy
-#
-# Electricity unit rate:
-#   sensor.octopus_energy_electricity_15p0128357_1640000213346_current_rate
 #
 # State-machine overview
 # ----------------------
@@ -517,58 +503,6 @@ template:
           {% else %}
             {{ cycle }}
           {% endif %}
-
-# -----------------------------------------------------------------------------
-# NOTIFICATIONS
-# -----------------------------------------------------------------------------
-# Notifications consume attributes directly from the cycle-state transition.
-# No standalone "last started", "last finished", duration or energy entities
-# are needed just to format these messages.
-automation:
-  - id: dishwasher_started_notification
-    alias: Dishwasher started notification
-    description: Notify labelled push targets when a dishwasher cycle starts.
-    triggers:
-      - trigger: state
-        entity_id: sensor.kitchen_dishwasher_cycle_state
-        from: "Starting"
-        to: "Running"
-    actions:
-      - action: notify.send_message
-        target:
-          label_id: "{{ label_id('Receive push notifications') }}"
-        data:
-          title: 🍽️ Dishwasher started
-          message: >-
-            Started at {{
-              as_timestamp(trigger.to_state.attributes.get('last_started_at'))
-              | timestamp_custom('%H:%M')
-            }}
-
-  - id: dishwasher_finished_notification
-    alias: Dishwasher finished notification
-    description: Notify labelled push targets when a dishwasher cycle finishes.
-    triggers:
-      - trigger: state
-        entity_id: sensor.kitchen_dishwasher_cycle_state
-        from: "Finish pending"
-        to: "Finished"
-    actions:
-      - action: notify.send_message
-        target:
-          label_id: "{{ label_id('Receive push notifications') }}"
-        data:
-          title: 🍽️ Dishwasher finished
-          message: >-
-            {% set duration_s = trigger.to_state.attributes.get('last_duration_s') | int(0) %}
-            {% set total_minutes = duration_s // 60 %}
-            {% set hours = total_minutes // 60 %}
-            {% set minutes = total_minutes % 60 %}
-            {% set duration = (hours ~ 'h' if hours > 0 else '') ~ minutes ~ 'm' %}
-            {% set energy = trigger.to_state.attributes.get('last_cycle_energy_kwh') | float(0) %}
-            {% set rate = states('sensor.octopus_energy_electricity_15p0128357_1640000213346_current_rate') %}
-            {% set cost = energy * (rate | float(0)) if is_number(rate) else none %}
-            {{ duration }} • {{ '%.2f' | format(energy) }}kWh • {{ ('£%.2f' | format(cost)) if cost is not none else 'cost unavailable' }}
 
 # UI footprint
 # ------------
