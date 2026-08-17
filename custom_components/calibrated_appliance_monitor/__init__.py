@@ -16,9 +16,12 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     ACTIVE_W,
+    ALGORITHM_INDESIT_D2IHL326UK,
     ASLEEP_CONFIRM,
     ASLEEP_W,
+    CONF_ALGORITHM,
     CONF_SOURCE_DEVICE,
+    CONF_UNIT_RATE_ENTITY,
     DOMAIN,
     ENDING,
     END_WINDOW,
@@ -32,7 +35,6 @@ from .const import (
     STARTING,
     START_CONFIRM,
     START_W,
-    UNIT_RATE_ENTITY,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -76,6 +78,8 @@ class DishwasherMonitor:
         self.deadlines: dict[str, str] = {}
 
         self.source_device_id = entry.options.get(CONF_SOURCE_DEVICE)
+        self.algorithm = entry.options.get(CONF_ALGORITHM)
+        self.unit_rate_entity_id = entry.options.get(CONF_UNIT_RATE_ENTITY)
         self.power_entity_id: str | None = None
         self.energy_entity_id: str | None = None
         self.available = False
@@ -102,7 +106,10 @@ class DishwasherMonitor:
                 if key in stored:
                     setattr(self, key, stored[key])
 
-        if not self.source_device_id:
+        if not self.source_device_id or not self.algorithm:
+            return
+        if self.algorithm != ALGORITHM_INDESIT_D2IHL326UK:
+            _LOGGER.warning("Unsupported calibrated appliance algorithm: %s", self.algorithm)
             return
 
         self._find_source_entities()
@@ -376,7 +383,11 @@ class DishwasherMonitor:
         minutes = (self.last_duration_s or 0) // 60
         duration = f"{minutes // 60}h{minutes % 60}m" if minutes >= 60 else f"{minutes}m"
         energy = self.last_cycle_energy_kwh or 0.0
-        rate = self._number(self.hass.states.get(UNIT_RATE_ENTITY))
+        rate = (
+            self._number(self.hass.states.get(self.unit_rate_entity_id))
+            if self.unit_rate_entity_id
+            else None
+        )
         cost = f"£{energy * rate:.2f}" if rate is not None else "cost unavailable"
         self._notify(
             "🍽️ Dishwasher finished",
