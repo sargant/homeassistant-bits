@@ -12,12 +12,20 @@
 automation:
   - id: dishwasher_started_notification
     alias: Dishwasher started notification
-    description: Notify labelled push targets when the monitored dishwasher starts.
+    description: Notify labelled push targets when the monitored dishwasher start is confirmed.
     triggers:
+      # Running turns on immediately for a candidate start. Last started changes
+      # only when >30 W confirms the cycle, while retaining the retrospective time.
       - trigger: state
-        entity_id: binary_sensor.dishwasher_running
-        from: "off"
-        to: "on"
+        entity_id: sensor.dishwasher_last_started
+    conditions:
+      # Ignore entity creation/reload noise while allowing the first real cycle
+      # to change Unknown -> a confirmed retrospective timestamp.
+      - condition: template
+        value_template: >-
+          {{ trigger.from_state is not none
+             and trigger.from_state.state != 'unavailable'
+             and trigger.to_state.state not in ['unknown', 'unavailable'] }}
     actions:
       - action: notify.send_message
         target:
