@@ -44,7 +44,9 @@ async def async_unload_entry(
     hass: HomeAssistant, entry: CalibratedApplianceMonitorConfigEntry
 ) -> bool:
     """Unload one monitored appliance."""
-    if not entry.options.get(CONF_ALGORITHM) or not entry.options.get(CONF_SOURCE_DEVICE):
+    # The first Configure action reloads an entry that was previously loaded
+    # without runtime data or entity platforms, so there may be nothing to unload.
+    if not hasattr(entry, "runtime_data"):
         return True
 
     if not await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
