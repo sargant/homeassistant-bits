@@ -1,0 +1,19 @@
+{
+  "title": "Calibrated Appliance Monitor",
+  "config": {
+    "abort": {
+      "already_configured": "The dishwasher monitor is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Dishwasher source",
+        "description": "Select the smart plug measuring the dishwasher. Power and energy sensors are discovered automatically from that device.",
+        "data": {
+          "source_device": "Smart plug"
+        }
+      }
+    }
+  }
+}
