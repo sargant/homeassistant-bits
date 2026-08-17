@@ -1,418 +1,54 @@
-"""Calibrated Appliance Monitor runtime."""
+"""Calibrated Appliance Monitor integration lifecycle."""
 
-from collections.abc import Callable
-from datetime import datetime, timedelta
 import logging
-from typing import Any
 
-from homeassistant.components.sensor import SensorDeviceClass
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import EntityStateAttribute, Platform, STATE_UNAVAILABLE, STATE_UNKNOWN
-from homeassistant.core import CALLBACK_TYPE, Event, EventStateChangedData, HomeAssistant, State, callback
-from homeassistant.helpers import entity_registry as er
-from homeassistant.helpers.event import async_call_later, async_track_state_change_event
-from homeassistant.helpers.storage import Store
-from homeassistant.util import dt as dt_util
+from homeassistant.const import Platform
+from homeassistant.core import HomeAssistant
 
-from .const import (
-    ACTIVE_W,
-    ALGORITHM_INDESIT_D2IHL326UK,
-    ASLEEP_CONFIRM,
-    ASLEEP_W,
-    CONF_ALGORITHM,
-    CONF_SOURCE_DEVICE,
-    DOMAIN,
-    ENDING,
-    END_WINDOW,
-    FINISHED,
-    FINISH_CONFIRM,
-    FINISH_PENDING,
-    IDLE,
-    RUNNING,
-    RUNNING_STATES,
-    STARTING,
-    START_CONFIRM,
-    START_W,
-)
+from .algorithms import ALGORITHMS, create_monitor
+from .algorithms.base import ApplianceMonitor
+from .const import CONF_ALGORITHM, CONF_SOURCE_DEVICE
 
 _LOGGER = logging.getLogger(__name__)
 PLATFORMS = [Platform.SENSOR, Platform.BINARY_SENSOR]
 
+type CalibratedApplianceMonitorConfigEntry = ConfigEntry[ApplianceMonitor]
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Set up the dishwasher monitor."""
-    monitor = DishwasherMonitor(hass, entry)
+
+async def async_setup_entry(
+    hass: HomeAssistant, entry: CalibratedApplianceMonitorConfigEntry
+) -> bool:
+    """Set up one monitored appliance."""
+    algorithm_id = entry.options.get(CONF_ALGORITHM)
+    source_device_id = entry.options.get(CONF_SOURCE_DEVICE)
+
+    # Adding the integration creates an empty entry by design. The appliance is
+    # created only after Configure has supplied a source device and algorithm.
+    if not algorithm_id or not source_device_id:
+        return True
+
+    if algorithm_id not in ALGORITHMS:
+        _LOGGER.error("Unknown calibrated appliance algorithm: %s", algorithm_id)
+        return False
+
+    monitor = create_monitor(hass, entry, algorithm_id)
     await monitor.async_setup()
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = monitor
+    entry.runtime_data = monitor
+
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 
 
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Unload the dishwasher monitor."""
+async def async_unload_entry(
+    hass: HomeAssistant, entry: CalibratedApplianceMonitorConfigEntry
+) -> bool:
+    """Unload one monitored appliance."""
+    if not entry.options.get(CONF_ALGORITHM) or not entry.options.get(CONF_SOURCE_DEVICE):
+        return True
+
     if not await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
         return False
-    monitor: DishwasherMonitor = hass.data[DOMAIN].pop(entry.entry_id)
-    monitor.unload()
+
+    entry.runtime_data.unload()
     return True
-
-
-class DishwasherMonitor:
-    """Power-profile detector calibrated for the Indesit D2IHL326UK.
-
-    The state machine is deliberately simple and mirrors the proven YAML:
-
-    Idle -> Starting -> Running -> Ending -> Finish pending -> Finished -> Idle
-
-    A >5 W rise creates a candidate start. Reaching >30 W within six minutes
-    confirms it and backdates the real start to that candidate time. During a
-    confirmed cycle, 15 continuous minutes below 30 W arms the end sequence.
-    After the final activity, one minute below 5 W confirms completion, and one
-    minute below 1 W returns the appliance from Finished to Idle.
-    """
-
-    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
-        self.hass = hass
-        self.entry = entry
-        self.store = Store(hass, 1, f"{DOMAIN}.{entry.entry_id}")
-
-        # Cycle facts are persisted independently of the entities that expose
-        # them, so an HA restart does not erase an in-progress or previous cycle.
-        self.state = IDLE
-        self.candidate_started_at: str | None = None
-        self.candidate_start_energy_kwh: float | None = None
-        self.last_started_at: str | None = None
-        self.last_started_energy_kwh: float | None = None
-        self.last_finished_at: str | None = None
-        self.last_duration_s: int | None = None
-        self.last_cycle_energy_kwh: float | None = None
-        self.deadlines: dict[str, str] = {}
-
-        self.source_device_id = entry.options.get(CONF_SOURCE_DEVICE)
-        self.algorithm = entry.options.get(CONF_ALGORITHM)
-        self.power_entity_id: str | None = None
-        self.energy_entity_id: str | None = None
-        self.available = False
-        self.power: float | None = None
-
-        self.listeners: list[Callable[[], None]] = []
-        self.timers: dict[str, CALLBACK_TYPE] = {}
-        self.unsub_power: CALLBACK_TYPE | None = None
-
-    async def async_setup(self) -> None:
-        """Restore state and listen to the selected smart plug."""
-        if stored := await self.store.async_load():
-            for key in (
-                "state",
-                "candidate_started_at",
-                "candidate_start_energy_kwh",
-                "last_started_at",
-                "last_started_energy_kwh",
-                "last_finished_at",
-                "last_duration_s",
-                "last_cycle_energy_kwh",
-                "deadlines",
-            ):
-                if key in stored:
-                    setattr(self, key, stored[key])
-
-        if not self.source_device_id or not self.algorithm:
-            return
-        if self.algorithm != ALGORITHM_INDESIT_D2IHL326UK:
-            _LOGGER.warning("Unsupported calibrated appliance algorithm: %s", self.algorithm)
-            return
-
-        # The user selects the smart-plug device, not individual entities. Find
-        # its power and cumulative-energy sensors by device class at runtime.
-        self._find_source_entities()
-        if not self.power_entity_id:
-            _LOGGER.warning("Selected dishwasher source has no power sensor")
-            return
-
-        self.power = self._number(self.hass.states.get(self.power_entity_id))
-        self.available = self.power is not None
-        self.unsub_power = async_track_state_change_event(
-            self.hass, self.power_entity_id, self._power_changed
-        )
-        if self.power is not None:
-            self._startup(self.power)
-
-    def unload(self) -> None:
-        """Cancel callbacks."""
-        if self.unsub_power:
-            self.unsub_power()
-        for cancel in self.timers.values():
-            cancel()
-        self.timers.clear()
-
-    def add_listener(self, listener: Callable[[], None]) -> CALLBACK_TYPE:
-        """Subscribe an entity to monitor changes."""
-        self.listeners.append(listener)
-
-        def remove() -> None:
-            self.listeners.remove(listener)
-
-        return remove
-
-    @property
-    def running(self) -> bool:
-        return self.state in RUNNING_STATES
-
-    @property
-    def phase(self) -> str:
-        return self.state if self.state in (IDLE, FINISHED) else RUNNING
-
-    @property
-    def attributes(self) -> dict[str, Any]:
-        return {
-            "candidate_started_at": self.candidate_started_at,
-            "candidate_start_energy_kwh": self.candidate_start_energy_kwh,
-            "last_started_at": self.last_started_at,
-            "last_started_energy_kwh": self.last_started_energy_kwh,
-            "last_finished_at": self.last_finished_at,
-            "last_duration_s": self.last_duration_s,
-            "last_cycle_energy_kwh": self.last_cycle_energy_kwh,
-        }
-
-    def _find_source_entities(self) -> None:
-        registry = er.async_get(self.hass)
-        for entity in er.async_entries_for_device(registry, self.source_device_id):
-            if entity.domain != Platform.SENSOR:
-                continue
-            device_class = entity.original_device_class
-            if device_class is None and (state := self.hass.states.get(entity.entity_id)):
-                device_class = state.attributes.get(EntityStateAttribute.DEVICE_CLASS)
-            if device_class == SensorDeviceClass.POWER and not self.power_entity_id:
-                self.power_entity_id = entity.entity_id
-            elif device_class == SensorDeviceClass.ENERGY and not self.energy_entity_id:
-                self.energy_entity_id = entity.entity_id
-
-    @staticmethod
-    def _number(state: State | None) -> float | None:
-        if state is None or state.state in (STATE_UNKNOWN, STATE_UNAVAILABLE):
-            return None
-        try:
-            return float(state.state)
-        except ValueError:
-            return None
-
-    def _energy(self) -> float | None:
-        return self._number(self.hass.states.get(self.energy_entity_id)) if self.energy_entity_id else None
-
-    @callback
-    def _power_changed(self, event: Event[EventStateChangedData]) -> None:
-        old = self._number(event.data["old_state"])
-        new = self._number(event.data["new_state"])
-        was_available = self.available
-        self.available = new is not None
-        if new is None:
-            if was_available:
-                self._changed()
-            return
-        if not was_available:
-            self._changed()
-
-        self.power = new
-        if old is None:
-            return
-
-        now = dt_util.now()
-
-        # A running dishwasher can spend several minutes at low power. Only
-        # 15 continuous minutes below 30 W are strong enough evidence to arm
-        # the end sequence; any renewed >30 W activity cancels this window.
-        if old >= ACTIVE_W > new and self.state == RUNNING:
-            self._schedule("end", END_WINDOW, self._end_timeout)
-
-        # Once final activity has happened, require a full minute below 5 W
-        # before declaring the cycle finished. This avoids reporting the end on
-        # a short pause and lets us backdate the finish to the start of the pause.
-        if old >= START_W > new and self.state == FINISH_PENDING:
-            self._schedule("finish", FINISH_CONFIRM, self._finish_timeout)
-
-        # Finished is deliberately sticky while the appliance is still awake.
-        # A minute below 1 W means the control electronics have gone properly idle.
-        if old >= ASLEEP_W > new:
-            self._schedule("asleep", ASLEEP_CONFIRM, self._asleep_timeout, persist=False)
-
-        if old < ASLEEP_W <= new:
-            self._cancel("asleep")
-
-        if old <= START_W < new:
-            if self.state == IDLE:
-                # >5 W is only a candidate start. Record the earliest plausible
-                # timestamp and energy now, then wait for convincing >30 W load.
-                self.candidate_started_at = now.isoformat()
-                self.candidate_start_energy_kwh = self._energy()
-                self._set_state(STARTING)
-                self._schedule("start", START_CONFIRM, self._start_timeout)
-            elif self.state == ENDING:
-                # The observed programme has a final burst after its long quiet
-                # period. Seeing it moves us to the final confirmation stage.
-                self._set_state(FINISH_PENDING)
-            elif self.state == FINISH_PENDING:
-                # The dishwasher woke again during the one-minute finish check.
-                self._cancel("finish")
-
-        if old <= ACTIVE_W < new:
-            if self.state == STARTING and "start" in self.timers:
-                # Strong activity confirms the candidate. Keep its original
-                # timestamp/energy rather than reporting confirmation six minutes late.
-                self.last_started_at = self.candidate_started_at
-                self.last_started_energy_kwh = self.candidate_start_energy_kwh
-                self._cancel("start")
-                self._set_state(RUNNING)
-            elif self.state in (RUNNING, ENDING, FINISH_PENDING):
-                # Any renewed >30 W activity proves the cycle is still running.
-                self._cancel("end")
-                self._cancel("finish")
-                self._set_state(RUNNING)
-
-    def _startup(self, power: float) -> None:
-        """Reconcile persisted detector state with live power after a restart.
-
-        We deliberately prefer false negatives over inventing a cycle. Pending
-        timers are resumed when their persisted deadline is still meaningful;
-        otherwise the current power reading determines the safest state.
-        """
-        if self.state == STARTING:
-            if power > ACTIVE_W:
-                self.last_started_at = self.candidate_started_at
-                self.last_started_energy_kwh = self.candidate_start_energy_kwh
-                self._set_state(RUNNING)
-            elif self._has_future_deadline("start"):
-                self._schedule("start", START_CONFIRM, self._start_timeout, resume=True)
-            else:
-                self._set_state(IDLE)
-        elif self.state == RUNNING and power < ACTIVE_W:
-            self._schedule("end", END_WINDOW, self._end_timeout, resume=True)
-        elif self.state == ENDING:
-            if power > ACTIVE_W:
-                self._set_state(RUNNING)
-            elif START_W < power < ACTIVE_W:
-                self._set_state(FINISH_PENDING)
-        elif self.state == FINISH_PENDING:
-            if power > ACTIVE_W:
-                self._set_state(RUNNING)
-            elif power < START_W:
-                self._schedule("finish", FINISH_CONFIRM, self._finish_timeout, resume=True)
-        elif self.state == FINISHED and power < ASLEEP_W:
-            self._set_state(IDLE)
-
-    def _has_future_deadline(self, name: str) -> bool:
-        saved = self.deadlines.get(name)
-        if not saved:
-            return False
-        try:
-            return datetime.fromisoformat(saved) > dt_util.now()
-        except ValueError:
-            return False
-
-    def _schedule(
-        self,
-        name: str,
-        seconds: int,
-        handler: Callable[[datetime], None],
-        *,
-        resume: bool = False,
-        persist: bool = True,
-    ) -> None:
-        saved = self.deadlines.get(name) if resume else None
-        self._cancel(name)
-        deadline = dt_util.now() + timedelta(seconds=seconds)
-        if saved:
-            try:
-                candidate = datetime.fromisoformat(saved)
-                if candidate > dt_util.now():
-                    deadline = candidate
-            except ValueError:
-                pass
-
-        # Start/end/finish windows survive HA restarts. The asleep debounce is
-        # intentionally ephemeral because losing it merely leaves Finished set
-        # until the next qualifying idle observation.
-        if persist:
-            self.deadlines[name] = deadline.isoformat()
-            self._save()
-
-        @callback
-        def fire(now: datetime) -> None:
-            self.timers.pop(name, None)
-            self.deadlines.pop(name, None)
-            self._save()
-            handler(now)
-
-        self.timers[name] = async_call_later(
-            self.hass,
-            max(0.0, (deadline - dt_util.now()).total_seconds()),
-            fire,
-        )
-
-    def _cancel(self, name: str) -> None:
-        if cancel := self.timers.pop(name, None):
-            cancel()
-        if name in self.deadlines:
-            self.deadlines.pop(name)
-            self._save()
-
-    @callback
-    def _start_timeout(self, _now: datetime) -> None:
-        # The >5 W candidate never developed into convincing programme load.
-        if self.state == STARTING:
-            self._set_state(IDLE)
-
-    @callback
-    def _end_timeout(self, _now: datetime) -> None:
-        if self.state == RUNNING and self.power is not None and self.power < ACTIVE_W:
-            # If we are still above 5 W, the final burst is already under way;
-            # otherwise wait in Ending for that burst to appear.
-            self._set_state(FINISH_PENDING if self.power > START_W else ENDING)
-
-    @callback
-    def _finish_timeout(self, _now: datetime) -> None:
-        if self.state != FINISH_PENDING or self.power is None or self.power >= START_W:
-            return
-
-        # Confirmation happens one minute after the real finish. Backdate the
-        # timestamp so duration and downstream notifications describe the cycle,
-        # not the detector's deliberate confirmation delay.
-        finished = dt_util.now() - timedelta(seconds=FINISH_CONFIRM)
-        self.last_finished_at = finished.isoformat()
-        if self.last_started_at:
-            started = datetime.fromisoformat(self.last_started_at)
-            self.last_duration_s = round((finished - started).total_seconds())
-        if (energy := self._energy()) is not None and self.last_started_energy_kwh is not None:
-            self.last_cycle_energy_kwh = round(energy - self.last_started_energy_kwh, 3)
-
-        self._set_state(FINISHED)
-
-    @callback
-    def _asleep_timeout(self, _now: datetime) -> None:
-        if self.power is not None and self.power < ASLEEP_W and self.state in (STARTING, FINISHED):
-            self._cancel("start")
-            self._set_state(IDLE)
-
-    def _set_state(self, state: str) -> None:
-        if self.state == state:
-            return
-        self.state = state
-        self._save()
-        self._changed()
-
-    def _save(self) -> None:
-        data = {
-            "state": self.state,
-            "candidate_started_at": self.candidate_started_at,
-            "candidate_start_energy_kwh": self.candidate_start_energy_kwh,
-            "last_started_at": self.last_started_at,
-            "last_started_energy_kwh": self.last_started_energy_kwh,
-            "last_finished_at": self.last_finished_at,
-            "last_duration_s": self.last_duration_s,
-            "last_cycle_energy_kwh": self.last_cycle_energy_kwh,
-            "deadlines": self.deadlines,
-        }
-        self.entry.async_create_task(self.hass, self.store.async_save(data))
-
-    def _changed(self) -> None:
-        for listener in tuple(self.listeners):
-            listener()
