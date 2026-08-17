@@ -8,6 +8,7 @@ from homeassistant.config_entries import (
     ConfigEntry,
     ConfigFlow,
     ConfigFlowResult,
+    FlowType,
     OptionsFlow,
     OptionsFlowWithReload,
 )
@@ -33,10 +34,20 @@ class CalibratedApplianceMonitorConfigFlow(ConfigFlow, domain=DOMAIN):
         """Create an entry without asking setup questions."""
         return self.async_create_entry(title="Calibrated Appliance Monitor", data={})
 
+    async def async_on_create_entry(
+        self, result: ConfigFlowResult
+    ) -> ConfigFlowResult:
+        """Continue first-run onboarding directly into appliance configuration."""
+        options_result = await self.hass.config_entries.options.async_init(
+            result["result"].entry_id
+        )
+        result["next_flow"] = (FlowType.OPTIONS_FLOW, options_result["flow_id"])
+        return result
+
     @staticmethod
     @callback
     def async_get_options_flow(config_entry: ConfigEntry) -> OptionsFlow:
-        """Configure the source device and calibrated algorithm afterwards."""
+        """Configure the source device and calibrated algorithm."""
         return CalibratedApplianceMonitorOptionsFlow()
 
 
