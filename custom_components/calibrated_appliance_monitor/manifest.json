@@ -4,7 +4,7 @@
   "codeowners": ["@sargant"],
   "config_flow": true,
   "documentation": "https://github.com/sargant/homeassistant-bits",
-  "integration_type": "helper",
+  "integration_type": "device",
   "iot_class": "calculated",
   "version": "0.1.0"
 }
