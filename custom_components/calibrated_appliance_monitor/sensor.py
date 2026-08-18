@@ -80,10 +80,9 @@ class CyclePhaseSensor(ApplianceSensor):
 
 
 class DishwasherDiagnosticSensor(ApplianceSensor):
-    """Disabled-by-default diagnostic from the dishwasher calibration."""
+    """Diagnostic from the dishwasher calibration."""
 
     _attr_entity_category = EntityCategory.DIAGNOSTIC
-    _attr_entity_registry_enabled_default = False
 
 
 class CandidateStartedSensor(DishwasherDiagnosticSensor):
