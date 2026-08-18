@@ -13,12 +13,15 @@ Home Assistant device. Appliance-specific thresholds and state machines live in
 1. Copy this directory to `/config/custom_components/calibrated_appliance_monitor`.
 2. Restart Home Assistant.
 3. Add **Calibrated Appliance Monitor** from **Settings → Devices & services**.
-4. Home Assistant creates the appliance entry and immediately continues into
-   **Appliance configuration**. Select:
+4. In **Appliance configuration**, select:
    - the smart plug measuring the appliance;
    - the calibrated appliance algorithm.
 
-After configuration, the entry is named for the selected appliance model and the
+The smart plug and algorithm define the appliance monitor and are stored as
+configuration rather than mutable options. To monitor a different appliance or
+source, remove the entry and add a new one.
+
+After setup, the entry is named for the selected appliance model and the
 integration creates its logical appliance device. Power and cumulative-energy
 sensors are discovered automatically from the selected smart-plug device.
 
