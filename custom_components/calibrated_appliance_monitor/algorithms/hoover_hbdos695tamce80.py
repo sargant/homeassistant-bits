@@ -37,19 +37,19 @@ _LOGGER = logging.getLogger(__name__)
 ALGORITHM_ID = "hoover_hbdos695tamce80"
 
 IDLE = "Idle"
-WET = "Wet"
-DRY = "Dry"
+WET = "Washing"
+DRY = "Drying"
 FINISHED = "Finished"
 
-OUTCOME_WET = "Wet"
-OUTCOME_DRY_ONLY = "Dry only"
-OUTCOME_WET_DRY = "Wet + dry"
+OUTCOME_WET = "Washing"
+OUTCOME_DRY_ONLY = "Drying only"
+OUTCOME_WET_DRY = "Washing + drying"
 
 # Calibrated from recorded cycles for this specific washer-dryer.
 START_W = 10.0
 ACTIVE_W = 30.0
 ASLEEP_W = 1.0
-START_WINDOW = 2 * 60
+START_WINDOW = 3 * 60
 DRY_MIN_W = 700.0
 DRY_MAX_W = 1300.0
 DRY_CONFIRM = 10
@@ -63,15 +63,15 @@ FINISHED_MAX = 10 * 60
 class HooverHBDOS695TAMCE80Monitor(ApplianceMonitor):
     """Power-profile detector calibrated for the Hoover HBDOS695TAMCE-80.
 
-    Public lifecycle: Idle -> Wet -> optional Dry -> Finished -> Idle.
+    Public lifecycle: Idle -> Washing -> optional Drying -> Finished -> Idle.
 
     Start and finish uncertainty stay internal. A >10 W reading records a
     candidate start, and later >30 W activity confirms it while retaining the
     original candidate timestamp. Drying is latched after ten continuous seconds
     in the distinctive 700..1300 W dryer band. Completion is confirmed after
-    continuous <10 W quiet: 45 seconds for wet-only cycles and 10 seconds once
-    drying has been seen. The official finish is backdated to the first quiet
-    sample. Finished remains visible for at least one minute and at most ten.
+    continuous <10 W quiet: 45 seconds while washing and 10 seconds once drying
+    has been seen. The official finish is backdated to the first quiet sample.
+    Finished remains visible for at least one minute and at most ten.
     """
 
     algorithm_id: ClassVar[str] = ALGORITHM_ID
