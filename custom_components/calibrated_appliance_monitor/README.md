@@ -55,11 +55,12 @@ remains the proper place for overall energy history.
 
 Algorithm bookkeeping is exposed separately as diagnostic entities. For the
 dishwasher these currently include **Start time candidate**, **Starting energy
-candidate**, and **Cycle start energy**. They are enabled and visible by default
-so the detector's retrospective decisions remain easy to inspect while still
-being clearly classified as diagnostics. Washer-dryer start, drying and finish
-candidates remain entirely internal so they never become part of its public
-state model.
+candidate**, and **Cycle start energy**. The washer-dryer exposes those same
+three diagnostics plus **Drying time candidate**, **Drying started**, and
+**Finish time candidate**. Candidate diagnostics show the live internal debounce
+windows while the public cycle phase remains stable. They are enabled and visible
+by default so retrospective detector decisions remain easy to inspect while
+being clearly classified as diagnostics rather than public appliance state.
 
 Thresholds and state machines are intentionally fixed in each algorithm module
 rather than exposed as tuning options.
