@@ -9,7 +9,6 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import CalibratedApplianceMonitorConfigEntry
 from .algorithms.base import ApplianceMonitor
-from .algorithms.hoover_hbdos695tamce80 import ALGORITHM_ID as HOOVER_HBDOS695TAMCE80
 from .algorithms.indesit_d2ihl326uk import ALGORITHM_ID as INDESIT_D2IHL326UK
 
 
@@ -23,22 +22,14 @@ async def async_setup_entry(
 
     entities: list[SensorEntity] = [CyclePhaseSensor(monitor)]
 
-    # Both current algorithms retrospectively confirm the cycle start, so keep
-    # that bookkeeping inspectable while calibrating against recorded traces.
-    if monitor.algorithm_id in (INDESIT_D2IHL326UK, HOOVER_HBDOS695TAMCE80):
+    # Diagnostics describe the implementation of this specific calibration, so
+    # they deliberately do not become part of the common ApplianceMonitor base.
+    if monitor.algorithm_id == INDESIT_D2IHL326UK:
         entities.extend(
             [
                 CandidateStartedSensor(monitor),
                 CandidateStartEnergySensor(monitor),
                 CycleStartEnergySensor(monitor),
-            ]
-        )
-
-    if monitor.algorithm_id == HOOVER_HBDOS695TAMCE80:
-        entities.extend(
-            [
-                DryingCandidateSensor(monitor),
-                FinishCandidateSensor(monitor),
             ]
         )
 
@@ -93,13 +84,13 @@ class CyclePhaseSensor(ApplianceSensor):
         return attributes
 
 
-class AlgorithmDiagnosticSensor(ApplianceSensor):
-    """Diagnostic bookkeeping from a calibrated algorithm."""
+class DishwasherDiagnosticSensor(ApplianceSensor):
+    """Diagnostic from the dishwasher calibration."""
 
     _attr_entity_category = EntityCategory.DIAGNOSTIC
 
 
-class CandidateStartedSensor(AlgorithmDiagnosticSensor):
+class CandidateStartedSensor(DishwasherDiagnosticSensor):
     """Earliest plausible start awaiting high-power confirmation."""
 
     _attr_name = "Start time candidate"
@@ -115,7 +106,7 @@ class CandidateStartedSensor(AlgorithmDiagnosticSensor):
         return datetime.fromisoformat(value) if value else None
 
 
-class CandidateStartEnergySensor(AlgorithmDiagnosticSensor):
+class CandidateStartEnergySensor(DishwasherDiagnosticSensor):
     """Cumulative meter reading captured at the candidate start."""
 
     _attr_name = "Starting energy candidate"
@@ -131,7 +122,7 @@ class CandidateStartEnergySensor(AlgorithmDiagnosticSensor):
         return getattr(self.monitor, "candidate_start_energy_kwh", None)
 
 
-class CycleStartEnergySensor(AlgorithmDiagnosticSensor):
+class CycleStartEnergySensor(DishwasherDiagnosticSensor):
     """Cumulative meter reading retained for the confirmed cycle start."""
 
     _attr_name = "Cycle start energy"
@@ -145,35 +136,3 @@ class CycleStartEnergySensor(AlgorithmDiagnosticSensor):
     @property
     def native_value(self) -> float | None:
         return getattr(self.monitor, "last_started_energy_kwh", None)
-
-
-class DryingCandidateSensor(AlgorithmDiagnosticSensor):
-    """First dryer-band sample awaiting confirmation."""
-
-    _attr_name = "Drying start candidate"
-    _attr_device_class = SensorDeviceClass.TIMESTAMP
-
-    def __init__(self, monitor: ApplianceMonitor) -> None:
-        super().__init__(monitor)
-        self._attr_unique_id = monitor.unique_id("drying_candidate")
-
-    @property
-    def native_value(self) -> datetime | None:
-        value = getattr(self.monitor, "dry_candidate_at", None)
-        return datetime.fromisoformat(value) if value else None
-
-
-class FinishCandidateSensor(AlgorithmDiagnosticSensor):
-    """First quiet sample awaiting finish confirmation."""
-
-    _attr_name = "Finish time candidate"
-    _attr_device_class = SensorDeviceClass.TIMESTAMP
-
-    def __init__(self, monitor: ApplianceMonitor) -> None:
-        super().__init__(monitor)
-        self._attr_unique_id = monitor.unique_id("finish_candidate")
-
-    @property
-    def native_value(self) -> datetime | None:
-        value = getattr(self.monitor, "finish_candidate_at", None)
-        return datetime.fromisoformat(value) if value else None
