@@ -18,7 +18,7 @@ from .const import CONF_ALGORITHM, CONF_SOURCE_DEVICE, DOMAIN
 class CalibratedApplianceMonitorConfigFlow(ConfigFlow, domain=DOMAIN):
     """Create one calibrated appliance monitor."""
 
-    VERSION = 2
+    VERSION = 1
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
