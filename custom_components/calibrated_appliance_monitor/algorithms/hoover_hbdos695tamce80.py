@@ -283,6 +283,9 @@ class HooverHBDOS695TAMCE80Monitor(ApplianceMonitor):
     ) -> None:
         """Maintain the hidden candidate start while public state stays put."""
         if self.candidate_started_at:
+            if self.state == FINISHED:
+                self._cancel("finished_min")
+                self._cancel("finished_max")
             if resume and not self._has_future_deadline("start"):
                 self._clear_start_candidate()
             else:
@@ -298,6 +301,12 @@ class HooverHBDOS695TAMCE80Monitor(ApplianceMonitor):
         if power > START_W:
             self.candidate_started_at = now.isoformat()
             self.candidate_start_energy_kwh = self._energy()
+            if self.state == FINISHED:
+                # A plausible new cycle takes precedence over the old cycle's
+                # UI-only Finished dwell. Keep the candidate alive until it
+                # confirms or its own start window expires.
+                self._cancel("finished_min")
+                self._cancel("finished_max")
             self._save()
             self._schedule("start", START_WINDOW, self._start_timeout)
             if power > ACTIVE_W:
@@ -330,6 +339,11 @@ class HooverHBDOS695TAMCE80Monitor(ApplianceMonitor):
     def _reconcile_finished(
         self, power: float, now: datetime, *, resume: bool = False
     ) -> None:
+        if self.candidate_started_at:
+            # Do not let the previous cycle's Finished deadline discard evidence
+            # for a plausible new cycle that has not yet reached >30 W.
+            return
+
         if not self.finished_entered_at:
             self.finished_entered_at = now.isoformat()
             self._save()
@@ -439,6 +453,11 @@ class HooverHBDOS695TAMCE80Monitor(ApplianceMonitor):
 
     @callback
     def _start_timeout(self, _now: datetime) -> None:
+        if self.state == FINISHED:
+            # A Finished-state candidate temporarily suspends the old dwell
+            # timers. If it never confirms, the previous cycle can now retire.
+            self._return_idle()
+            return
         self._clear_start_candidate()
 
     @callback
