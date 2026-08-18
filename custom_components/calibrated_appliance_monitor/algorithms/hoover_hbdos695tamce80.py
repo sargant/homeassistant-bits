@@ -256,6 +256,7 @@ class HooverHBDOS695TAMCE80Monitor(ApplianceMonitor):
                     if not self.dry_candidate_at:
                         self.dry_candidate_at = now.isoformat()
                         self._save()
+                        self._changed()
                     self._schedule(
                         "dry", DRY_CONFIRM, self._dry_timeout, resume=resume
                     )
@@ -269,6 +270,7 @@ class HooverHBDOS695TAMCE80Monitor(ApplianceMonitor):
                         self.finish_candidate_at = now.isoformat()
                         self.finish_candidate_energy_kwh = self._energy()
                         self._save()
+                        self._changed()
                     self._schedule(
                         "finish",
                         DRY_FINISH_CONFIRM if self.dry_seen else WET_FINISH_CONFIRM,
@@ -308,6 +310,7 @@ class HooverHBDOS695TAMCE80Monitor(ApplianceMonitor):
                 self._cancel("finished_min")
                 self._cancel("finished_max")
             self._save()
+            self._changed()
             self._schedule("start", START_WINDOW, self._start_timeout)
             if power > ACTIVE_W:
                 self._confirm_start()
@@ -430,16 +433,23 @@ class HooverHBDOS695TAMCE80Monitor(ApplianceMonitor):
             self._save()
 
     def _clear_start_candidate(self) -> None:
+        had_candidate = (
+            self.candidate_started_at is not None
+            or self.candidate_start_energy_kwh is not None
+        )
         self._cancel("start")
         self.candidate_started_at = None
         self.candidate_start_energy_kwh = None
         self._save()
+        if had_candidate:
+            self._changed()
 
     def _cancel_dry_candidate(self) -> None:
         self._cancel("dry")
         if self.dry_candidate_at is not None:
             self.dry_candidate_at = None
             self._save()
+            self._changed()
 
     def _cancel_finish_candidate(self) -> None:
         self._cancel("finish")
@@ -450,6 +460,7 @@ class HooverHBDOS695TAMCE80Monitor(ApplianceMonitor):
             self.finish_candidate_at = None
             self.finish_candidate_energy_kwh = None
             self._save()
+            self._changed()
 
     @callback
     def _start_timeout(self, _now: datetime) -> None:
