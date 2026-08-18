@@ -270,14 +270,11 @@ class IndesitD2IHL326UKMonitor(ApplianceMonitor):
 
     def _reconcile_power(self, power: float, *, resume: bool = False) -> None:
         """Reconcile a trustworthy reading after setup, restart, or outage."""
-        if self.state == IDLE:
-            if power > START_W:
-                self._begin_start(dt_util.now())
-                if power > ACTIVE_W:
-                    self._confirm_start()
-            return
-
-        if self.state == STARTING:
+        if self.state == IDLE and power > START_W:
+            self._begin_start(dt_util.now())
+            if power > ACTIVE_W:
+                self._confirm_start()
+        elif self.state == STARTING:
             if power > ACTIVE_W:
                 self._confirm_start()
             elif resume:
@@ -285,36 +282,23 @@ class IndesitD2IHL326UKMonitor(ApplianceMonitor):
                     self._schedule("start", START_CONFIRM, self._start_timeout, resume=True)
                 else:
                     self._set_state(IDLE)
-            return
-
-        if self.state == RUNNING:
-            if power < ACTIVE_W:
-                self._schedule("end", END_WINDOW, self._end_timeout, resume=resume)
-            else:
-                self._cancel("end")
-            return
-
-        if self.state == ENDING:
+        elif self.state == RUNNING and power < ACTIVE_W:
+            self._schedule("end", END_WINDOW, self._end_timeout, resume=resume)
+        elif self.state == ENDING:
             if power > ACTIVE_W:
                 self._set_state(RUNNING)
             elif power > START_W:
                 self._set_state(FINISH_PENDING)
-            return
-
-        if self.state == FINISH_PENDING:
+        elif self.state == FINISH_PENDING:
             if power > ACTIVE_W:
                 self._cancel("end")
                 self._cancel("finish")
                 self._set_state(RUNNING)
-            elif power > START_W:
-                self._cancel("finish")
-            else:
+            elif power < START_W:
                 self._schedule(
                     "finish", FINISH_CONFIRM, self._finish_timeout, resume=resume
                 )
-            return
-
-        if self.state == FINISHED and power < ASLEEP_W:
+        elif self.state == FINISHED and power < ASLEEP_W:
             self._schedule("asleep", ASLEEP_CONFIRM, self._asleep_timeout, persist=False)
 
     def _has_future_deadline(self, name: str) -> bool:
