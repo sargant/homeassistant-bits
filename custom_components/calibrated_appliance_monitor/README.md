@@ -35,11 +35,11 @@ retrospective candidate timestamp. The energy value is the consumption derived
 for the most recently completed cycle; the source smart plug remains the proper
 place for overall energy history.
 
-Algorithm bookkeeping is exposed separately as disabled-by-default diagnostic
-entities. For the dishwasher these currently include **Start time candidate**,
-**Starting energy candidate**, and **Cycle start energy**. They are useful while
-calibrating or debugging the detector but are not required for normal
-automations or notifications.
+Algorithm bookkeeping is exposed separately as diagnostic entities. For the
+dishwasher these currently include **Start time candidate**, **Starting energy
+candidate**, and **Cycle start energy**. They are enabled and visible by default
+so the detector's retrospective decisions remain easy to inspect while still
+being clearly classified as diagnostics.
 
 The only algorithm currently available is **Indesit D2IHL326UK dishwasher**.
 Its thresholds and state machine are intentionally fixed in its algorithm module
