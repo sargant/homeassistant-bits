@@ -16,17 +16,36 @@ PLATFORMS = [Platform.SENSOR, Platform.BINARY_SENSOR]
 type CalibratedApplianceMonitorConfigEntry = ConfigEntry[ApplianceMonitor]
 
 
+async def async_migrate_entry(
+    hass: HomeAssistant, entry: CalibratedApplianceMonitorConfigEntry
+) -> bool:
+    """Move appliance identity from mutable options into config-entry data."""
+    if entry.version == 1:
+        data = dict(entry.data)
+        for key in (CONF_SOURCE_DEVICE, CONF_ALGORITHM):
+            if key not in data and key in entry.options:
+                data[key] = entry.options[key]
+
+        hass.config_entries.async_update_entry(
+            entry,
+            data=data,
+            options={},
+            version=2,
+        )
+
+    return True
+
+
 async def async_setup_entry(
     hass: HomeAssistant, entry: CalibratedApplianceMonitorConfigEntry
 ) -> bool:
     """Set up one monitored appliance."""
-    algorithm_id = entry.options.get(CONF_ALGORITHM)
-    source_device_id = entry.options.get(CONF_SOURCE_DEVICE)
+    algorithm_id = entry.data.get(CONF_ALGORITHM)
+    source_device_id = entry.data.get(CONF_SOURCE_DEVICE)
 
-    # Adding the integration creates an empty entry by design. The appliance is
-    # created only after Configure has supplied a source device and algorithm.
     if not algorithm_id or not source_device_id:
-        return True
+        _LOGGER.error("Calibrated appliance entry is missing its appliance identity")
+        return False
 
     if algorithm_id not in ALGORITHMS:
         _LOGGER.error("Unknown calibrated appliance algorithm: %s", algorithm_id)
@@ -44,8 +63,6 @@ async def async_unload_entry(
     hass: HomeAssistant, entry: CalibratedApplianceMonitorConfigEntry
 ) -> bool:
     """Unload one monitored appliance."""
-    # The first Configure action reloads an entry that was previously loaded
-    # without runtime data or entity platforms, so there may be nothing to unload.
     if not hasattr(entry, "runtime_data"):
         return True
 
