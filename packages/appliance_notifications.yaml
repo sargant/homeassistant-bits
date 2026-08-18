@@ -55,3 +55,68 @@ automation:
             {% set rate = states('sensor.octopus_energy_electricity_15p0128357_1640000213346_current_rate') %}
             {% set cost = energy * (rate | float(0)) if is_number(rate) else none %}
             {{ duration }} • {{ '%.2f' | format(energy) }}kWh • {{ ('£%.2f' | format(cost)) if cost is not none else 'cost unavailable' }}
+
+  - id: washer_dryer_started_notification
+    alias: Washer dryer started notification
+    description: Notify labelled push targets when the monitored washer-dryer start is confirmed.
+    triggers:
+      # A normal cycle starts from Idle. A deliberately chained programme can
+      # also be confirmed while the previous cycle is still visibly Finished.
+      - trigger: state
+        entity_id: sensor.kitchen_washer_dryer_cycle_phase
+        from: "Idle"
+        to: "Washing"
+      - trigger: state
+        entity_id: sensor.kitchen_washer_dryer_cycle_phase
+        from: "Finished"
+        to: "Washing"
+    actions:
+      - action: notify.send_message
+        target:
+          label_id: "{{ label_id('Receive push notifications') }}"
+        data:
+          title: 🧺 Laundry started
+          message: >-
+            Started at {{
+              as_timestamp(trigger.to_state.attributes.get('last_started'))
+              | timestamp_custom('%H:%M')
+            }}
+
+  - id: washer_dryer_finished_notification
+    alias: Washer dryer finished notification
+    description: Notify labelled push targets when the monitored washer-dryer finishes.
+    triggers:
+      - trigger: state
+        entity_id: sensor.kitchen_washer_dryer_cycle_phase
+        from: "Washing"
+        to: "Finished"
+      - trigger: state
+        entity_id: sensor.kitchen_washer_dryer_cycle_phase
+        from: "Drying"
+        to: "Finished"
+    actions:
+      - action: notify.send_message
+        target:
+          label_id: "{{ label_id('Receive push notifications') }}"
+        data:
+          title: 🧺 Laundry finished
+          message: >-
+            {% set started = as_timestamp(trigger.to_state.attributes.get('last_started')) %}
+            {% set finished = as_timestamp(trigger.to_state.attributes.get('last_finished')) %}
+            {% set duration_s = ((finished - started) if started is not none and finished is not none else 0) | int(0) %}
+            {% set total_minutes = duration_s // 60 %}
+            {% set hours = total_minutes // 60 %}
+            {% set minutes = total_minutes % 60 %}
+            {% set duration = (hours ~ 'h' if hours > 0 else '') ~ minutes ~ 'm' %}
+            {% set outcome = trigger.to_state.attributes.get('last_cycle_outcome') %}
+            {% set energy_value = trigger.to_state.attributes.get('last_cycle_energy_kwh') %}
+            {% set energy_ok = is_number(energy_value) %}
+            {% set energy = energy_value | float(0) %}
+            {% set rate = states('sensor.octopus_energy_electricity_15p0128357_1640000213346_current_rate') %}
+            {% set cost = energy * (rate | float(0)) if energy_ok and is_number(rate) else none %}
+            {{ outcome if outcome else 'Laundry' }} • {{ duration }} • {{
+              (('%.2f' | format(energy)) ~ 'kWh') if energy_ok
+              else 'energy unavailable'
+            }} • {{
+              ('£%.2f' | format(cost)) if cost is not none else 'cost unavailable'
+            }}
