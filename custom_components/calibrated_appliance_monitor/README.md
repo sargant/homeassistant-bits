@@ -33,7 +33,7 @@ For the washer-dryer, uncertainty is deliberately kept internal and cycle phase
 is only `Idle`, `Washing`, `Drying`, and `Finished`. A hidden >10 W start
 candidate is confirmed by >30 W activity within a three-minute window. Drying is
 latched after 10 seconds in the calibrated 700–1300 W dryer band. Finish is
-backdated to the first <10 W sample after 45 seconds of quiet while washing, or
+backdated to the first <10 W sample after 60 seconds of quiet while washing, or
 10 seconds once drying has been seen. `Finished` remains visible for at least 60
 seconds; after that it returns to `Idle` below 1 W, with a hard maximum of 10
 minutes.
