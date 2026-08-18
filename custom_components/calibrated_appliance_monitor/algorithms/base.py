@@ -20,8 +20,7 @@ class ApplianceMonitor:
     model: ClassVar[str]
     icon: ClassVar[str] = "mdi:power-plug"
 
-    state: str
-    phase: str
+    cycle_phase: str
     running: bool
     available: bool
     attributes: dict[str, Any]
