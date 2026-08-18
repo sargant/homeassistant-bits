@@ -21,7 +21,7 @@ async def async_setup_entry(
     monitor = entry.runtime_data
 
     entities: list[SensorEntity] = [
-        PhaseSensor(monitor),
+        CyclePhaseSensor(monitor),
         LastStartedSensor(monitor),
         LastFinishedSensor(monitor),
         LastCycleEnergySensor(monitor),
@@ -32,7 +32,6 @@ async def async_setup_entry(
     if monitor.algorithm_id == INDESIT_D2IHL326UK:
         entities.extend(
             [
-                CycleStateSensor(monitor),
                 CandidateStartedSensor(monitor),
                 CandidateStartEnergySensor(monitor),
                 CycleStartEnergySensor(monitor),
@@ -60,19 +59,19 @@ class ApplianceSensor(SensorEntity):
         return self.monitor.available
 
 
-class PhaseSensor(ApplianceSensor):
-    """Public appliance phase chosen by the selected algorithm."""
+class CyclePhaseSensor(ApplianceSensor):
+    """Public lifecycle phase chosen by the selected appliance algorithm."""
 
-    _attr_name = "Phase"
+    _attr_name = "Cycle phase"
 
     def __init__(self, monitor: ApplianceMonitor) -> None:
         super().__init__(monitor)
         self._attr_icon = monitor.icon
-        self._attr_unique_id = monitor.unique_id("phase")
+        self._attr_unique_id = monitor.unique_id("cycle_phase")
 
     @property
     def native_value(self) -> str:
-        return self.monitor.phase
+        return self.monitor.cycle_phase
 
 
 class LastStartedSensor(ApplianceSensor):
@@ -128,23 +127,6 @@ class DishwasherDiagnosticSensor(ApplianceSensor):
 
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_entity_registry_enabled_default = False
-
-
-class CycleStateSensor(DishwasherDiagnosticSensor):
-    """Detailed internal dishwasher detector state."""
-
-    _attr_name = "Cycle state"
-
-    def __init__(self, monitor: ApplianceMonitor) -> None:
-        super().__init__(monitor)
-        self._attr_icon = monitor.icon
-        # Keep the existing unique ID so an installation that already created
-        # this entity simply moves it into Diagnostics rather than replacing it.
-        self._attr_unique_id = monitor.unique_id("cycle_state")
-
-    @property
-    def native_value(self) -> str:
-        return self.monitor.state
 
 
 class CandidateStartedSensor(DishwasherDiagnosticSensor):
