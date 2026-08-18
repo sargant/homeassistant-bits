@@ -22,17 +22,20 @@ After configuration, the entry is named for the selected appliance model and the
 integration creates its logical appliance device. Power and cumulative-energy
 sensors are discovered automatically from the selected smart-plug device.
 
-The public dishwasher surface is deliberately small: **Phase**, **Running**,
-**Last started**, **Last finished**, and **Last cycle energy**. A `Starting`
-candidate immediately appears publicly as Running, matching the original YAML
-helpers, while **Last started** is populated only once >30 W confirms the cycle
-and retains the retrospective candidate timestamp.
+The public dishwasher surface is deliberately small: **Cycle phase**,
+**Running**, **Last started**, **Last finished**, and **Last cycle energy**.
+Cycle phase exposes the algorithm's meaningful lifecycle directly; for the
+current dishwasher calibration that is `Idle`, `Starting`, `Running`, `Ending`,
+`Finish pending`, and `Finished`. Running is the simpler yes/no view for
+consumers that do not care about the detailed phase. **Last started** is
+populated only once >30 W confirms the cycle and retains the retrospective
+candidate timestamp.
 
-Algorithm internals are exposed separately as disabled-by-default diagnostic
-entities. For the dishwasher these currently include **Cycle state**,
-**Candidate started**, **Candidate start energy**, and **Cycle start energy**.
-They are useful while calibrating or debugging the detector but are not required
-for normal automations or notifications.
+Algorithm bookkeeping is exposed separately as disabled-by-default diagnostic
+entities. For the dishwasher these currently include **Candidate started**,
+**Candidate start energy**, and **Cycle start energy**. They are useful while
+calibrating or debugging the detector but are not required for normal
+automations or notifications.
 
 The only algorithm currently available is **Indesit D2IHL326UK dishwasher**.
 Its thresholds and state machine are intentionally fixed in its algorithm module
