@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 import logging
 from typing import ClassVar
 
-from homeassistant.components.sensor import SensorDeviceClass
+from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     EntityStateAttribute,
@@ -145,13 +145,17 @@ class IndesitD2IHL326UKMonitor(ApplianceMonitor):
         for entity in er.async_entries_for_device(registry, self.source_device_id):
             if entity.domain != Platform.SENSOR:
                 continue
+            state = self.hass.states.get(entity.entity_id)
             device_class = entity.original_device_class
-            if device_class is None and (state := self.hass.states.get(entity.entity_id)):
+            if device_class is None and state:
                 device_class = state.attributes.get(EntityStateAttribute.DEVICE_CLASS)
             if device_class == SensorDeviceClass.POWER and not self.power_entity_id:
                 self.power_entity_id = entity.entity_id
-            elif device_class == SensorDeviceClass.ENERGY and not self.energy_entity_id:
-                self.energy_entity_id = entity.entity_id
+            elif device_class == SensorDeviceClass.ENERGY:
+                if not self.energy_entity_id:
+                    self.energy_entity_id = entity.entity_id
+                if state and state.attributes.get("state_class") == SensorStateClass.TOTAL_INCREASING:
+                    self.energy_entity_id = entity.entity_id
 
     @staticmethod
     def _number(state: State | None) -> float | None:
@@ -380,6 +384,7 @@ class IndesitD2IHL326UKMonitor(ApplianceMonitor):
         if (
             (energy := self._energy()) is not None
             and self.last_started_energy_kwh is not None
+            and energy >= self.last_started_energy_kwh
         ):
             self.last_cycle_energy_kwh = round(energy - self.last_started_energy_kwh, 3)
 
