@@ -9,6 +9,7 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import CalibratedApplianceMonitorConfigEntry
 from .algorithms.base import ApplianceMonitor
+from .algorithms.hoover_hbdos695tamce80 import ALGORITHM_ID as HOOVER_HBDOS695TAMCE80
 from .algorithms.indesit_d2ihl326uk import ALGORITHM_ID as INDESIT_D2IHL326UK
 
 
@@ -22,14 +23,25 @@ async def async_setup_entry(
 
     entities: list[SensorEntity] = [CyclePhaseSensor(monitor)]
 
-    # Diagnostics describe the implementation of this specific calibration, so
-    # they deliberately do not become part of the common ApplianceMonitor base.
+    # Diagnostics describe the implementation of each calibration, so they
+    # deliberately do not become part of the common ApplianceMonitor base.
     if monitor.algorithm_id == INDESIT_D2IHL326UK:
         entities.extend(
             [
                 CandidateStartedSensor(monitor),
                 CandidateStartEnergySensor(monitor),
                 CycleStartEnergySensor(monitor),
+            ]
+        )
+    elif monitor.algorithm_id == HOOVER_HBDOS695TAMCE80:
+        entities.extend(
+            [
+                CandidateStartedSensor(monitor),
+                CandidateStartEnergySensor(monitor),
+                CycleStartEnergySensor(monitor),
+                DryingCandidateSensor(monitor),
+                DryingStartedSensor(monitor),
+                FinishCandidateSensor(monitor),
             ]
         )
 
@@ -84,13 +96,13 @@ class CyclePhaseSensor(ApplianceSensor):
         return attributes
 
 
-class DishwasherDiagnosticSensor(ApplianceSensor):
-    """Diagnostic from the dishwasher calibration."""
+class DiagnosticSensor(ApplianceSensor):
+    """Diagnostic entity exposing calibration internals."""
 
     _attr_entity_category = EntityCategory.DIAGNOSTIC
 
 
-class CandidateStartedSensor(DishwasherDiagnosticSensor):
+class CandidateStartedSensor(DiagnosticSensor):
     """Earliest plausible start awaiting high-power confirmation."""
 
     _attr_name = "Start time candidate"
@@ -106,7 +118,7 @@ class CandidateStartedSensor(DishwasherDiagnosticSensor):
         return datetime.fromisoformat(value) if value else None
 
 
-class CandidateStartEnergySensor(DishwasherDiagnosticSensor):
+class CandidateStartEnergySensor(DiagnosticSensor):
     """Cumulative meter reading captured at the candidate start."""
 
     _attr_name = "Starting energy candidate"
@@ -122,7 +134,7 @@ class CandidateStartEnergySensor(DishwasherDiagnosticSensor):
         return getattr(self.monitor, "candidate_start_energy_kwh", None)
 
 
-class CycleStartEnergySensor(DishwasherDiagnosticSensor):
+class CycleStartEnergySensor(DiagnosticSensor):
     """Cumulative meter reading retained for the confirmed cycle start."""
 
     _attr_name = "Cycle start energy"
@@ -136,3 +148,51 @@ class CycleStartEnergySensor(DishwasherDiagnosticSensor):
     @property
     def native_value(self) -> float | None:
         return getattr(self.monitor, "last_started_energy_kwh", None)
+
+
+class DryingCandidateSensor(DiagnosticSensor):
+    """First dryer-band sample awaiting drying confirmation."""
+
+    _attr_name = "Drying time candidate"
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+
+    def __init__(self, monitor: ApplianceMonitor) -> None:
+        super().__init__(monitor)
+        self._attr_unique_id = monitor.unique_id("drying_candidate")
+
+    @property
+    def native_value(self) -> datetime | None:
+        value = getattr(self.monitor, "dry_candidate_at", None)
+        return datetime.fromisoformat(value) if value else None
+
+
+class DryingStartedSensor(DiagnosticSensor):
+    """Retrospective start of confirmed tumble drying."""
+
+    _attr_name = "Drying started"
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+
+    def __init__(self, monitor: ApplianceMonitor) -> None:
+        super().__init__(monitor)
+        self._attr_unique_id = monitor.unique_id("drying_started")
+
+    @property
+    def native_value(self) -> datetime | None:
+        value = getattr(self.monitor, "drying_started_at", None)
+        return datetime.fromisoformat(value) if value else None
+
+
+class FinishCandidateSensor(DiagnosticSensor):
+    """First quiet sample awaiting cycle-finish confirmation."""
+
+    _attr_name = "Finish time candidate"
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+
+    def __init__(self, monitor: ApplianceMonitor) -> None:
+        super().__init__(monitor)
+        self._attr_unique_id = monitor.unique_id("finish_candidate")
+
+    @property
+    def native_value(self) -> datetime | None:
+        value = getattr(self.monitor, "finish_candidate_at", None)
+        return datetime.fromisoformat(value) if value else None
