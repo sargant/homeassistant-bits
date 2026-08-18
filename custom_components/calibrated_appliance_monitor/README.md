@@ -30,19 +30,20 @@ For the dishwasher, cycle phase is `Idle`, `Starting`, `Running`, `Ending`,
 `Finish pending`, and `Finished`.
 
 For the washer-dryer, uncertainty is deliberately kept internal and cycle phase
-is only `Idle`, `Wet`, `Dry`, and `Finished`. A hidden >10 W start candidate is
-confirmed by >30 W activity. Drying is latched after 10 seconds in the calibrated
-700–1300 W dryer band. Finish is backdated to the first <10 W sample after 45
-seconds of quiet for wet cycles, or 10 seconds once drying has been seen.
-`Finished` remains visible for at least 60 seconds; after that it returns to
-`Idle` below 1 W, with a hard maximum of 10 minutes.
+is only `Idle`, `Washing`, `Drying`, and `Finished`. A hidden >10 W start
+candidate is confirmed by >30 W activity within a three-minute window. Drying is
+latched after 10 seconds in the calibrated 700–1300 W dryer band. Finish is
+backdated to the first <10 W sample after 45 seconds of quiet while washing, or
+10 seconds once drying has been seen. `Finished` remains visible for at least 60
+seconds; after that it returns to `Idle` below 1 W, with a hard maximum of 10
+minutes.
 
 Cycle metadata is carried as attributes on **Cycle phase** rather than separate
 entities: `last_started`, `last_finished`, and `last_cycle_energy_kwh`.
-Washer-dryer entries also expose `last_cycle_outcome`, classified as `Wet`,
-`Dry only`, or `Wet + dry`. The dry-only boundary is currently two minutes from
-the retrospective cycle start and is intentionally easy to recalibrate in the
-algorithm module.
+Washer-dryer entries also expose `last_cycle_outcome`, classified as `Washing`,
+`Drying only`, or `Washing + drying`. The drying-only boundary is currently two
+minutes from the retrospective cycle start and is intentionally easy to
+recalibrate in the algorithm module.
 
 For the dishwasher, `last_started` is populated only once >30 W confirms the
 cycle and retains the retrospective candidate timestamp. The energy value is the
