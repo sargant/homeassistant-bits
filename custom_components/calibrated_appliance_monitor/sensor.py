@@ -67,9 +67,7 @@ class CyclePhaseSensor(ApplianceSensor):
     def __init__(self, monitor: ApplianceMonitor) -> None:
         super().__init__(monitor)
         self._attr_icon = monitor.icon
-        # Earlier versions of this integration called this entity Cycle state.
-        # Keep that integration-scoped unique ID stable across the display rename.
-        self._attr_unique_id = monitor.unique_id("cycle_state")
+        self._attr_unique_id = monitor.unique_id("cycle_phase")
 
     @property
     def native_value(self) -> str:
@@ -134,7 +132,7 @@ class DishwasherDiagnosticSensor(ApplianceSensor):
 class CandidateStartedSensor(DishwasherDiagnosticSensor):
     """Earliest plausible start awaiting high-power confirmation."""
 
-    _attr_name = "Candidate started"
+    _attr_name = "Start time candidate"
     _attr_device_class = SensorDeviceClass.TIMESTAMP
 
     def __init__(self, monitor: ApplianceMonitor) -> None:
@@ -150,7 +148,7 @@ class CandidateStartedSensor(DishwasherDiagnosticSensor):
 class CandidateStartEnergySensor(DishwasherDiagnosticSensor):
     """Cumulative meter reading captured at the candidate start."""
 
-    _attr_name = "Candidate start energy"
+    _attr_name = "Starting energy candidate"
     _attr_device_class = SensorDeviceClass.ENERGY
     _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
 
