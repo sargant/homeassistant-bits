@@ -49,12 +49,13 @@ cycle and retains the retrospective candidate timestamp. The energy value is the
 consumption derived for the most recently completed cycle; the source smart plug
 remains the proper place for overall energy history.
 
-Algorithm bookkeeping is exposed separately as diagnostic entities. Both
-algorithms expose **Start time candidate**, **Starting energy candidate**, and
-**Cycle start energy**. The washer-dryer additionally exposes **Drying start
-candidate** and **Finish time candidate** so its short confirmation windows can
-be checked against live traces without turning uncertainty into public states.
-These diagnostics are enabled and visible by default.
+Algorithm bookkeeping is exposed separately as diagnostic entities. For the
+dishwasher these currently include **Start time candidate**, **Starting energy
+candidate**, and **Cycle start energy**. They are enabled and visible by default
+so the detector's retrospective decisions remain easy to inspect while still
+being clearly classified as diagnostics. Washer-dryer start, drying and finish
+candidates remain entirely internal so they never become part of its public
+state model.
 
 Thresholds and state machines are intentionally fixed in each algorithm module
 rather than exposed as tuning options.
