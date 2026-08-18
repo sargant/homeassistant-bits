@@ -22,14 +22,18 @@ After configuration, the entry is named for the selected appliance model and the
 integration creates its logical appliance device. Power and cumulative-energy
 sensors are discovered automatically from the selected smart-plug device.
 
-The public dishwasher surface is deliberately small: **Cycle phase**,
-**Running**, **Last started**, **Last finished**, and **Last cycle energy**.
-Cycle phase exposes the algorithm's meaningful lifecycle directly; for the
-current dishwasher calibration that is `Idle`, `Starting`, `Running`, `Ending`,
-`Finish pending`, and `Finished`. Running is the simpler yes/no view for
-consumers that do not care about the detailed phase. **Last started** is
-populated only once >30 W confirms the cycle and retains the retrospective
-candidate timestamp.
+The public dishwasher surface is deliberately small: **Cycle phase** and
+**Running**. Cycle phase exposes the algorithm's meaningful lifecycle directly;
+for the current dishwasher calibration that is `Idle`, `Starting`, `Running`,
+`Ending`, `Finish pending`, and `Finished`. Running is the simpler yes/no view
+for consumers that do not care about the detailed phase.
+
+Cycle metadata is carried as attributes on **Cycle phase** rather than separate
+entities: `last_started`, `last_finished`, and `last_cycle_energy_kwh`.
+`last_started` is populated only once >30 W confirms the cycle and retains the
+retrospective candidate timestamp. The energy value is the consumption derived
+for the most recently completed cycle; the source smart plug remains the proper
+place for overall energy history.
 
 Algorithm bookkeeping is exposed separately as disabled-by-default diagnostic
 entities. For the dishwasher these currently include **Start time candidate**,
