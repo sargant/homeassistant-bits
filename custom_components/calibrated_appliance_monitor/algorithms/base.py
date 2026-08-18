@@ -1,7 +1,7 @@
 """Shared plumbing for calibrated appliance algorithms."""
 
 from collections.abc import Callable
-from typing import Any, ClassVar
+from typing import ClassVar
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant
@@ -23,7 +23,6 @@ class ApplianceMonitor:
     state: str
     running: bool
     available: bool
-    attributes: dict[str, Any]
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         self.hass = hass
