@@ -1,5 +1,5 @@
-# Home Assistant YAML
+# Home Assistant bits
 
-Personal Home Assistant YAML configs and assorted experiments.
+Personal Home Assistant configs, custom integrations, and assorted experiments.
 
 Mostly useful to me.
