@@ -3,8 +3,7 @@
 # Household-specific notification policy for appliance monitors. Detection stays
 # in the appliance integration; this package decides when and how to notify.
 #
-# Notifications deliberately consume only the public appliance surface. The
-# detailed dishwasher detector state is diagnostic and may remain disabled.
+# Notifications deliberately consume only the public appliance surface.
 #
 # The electricity unit-rate entity remains installation-specific because it is
 # used only to format the finished notification, not to detect the cycle.
@@ -14,8 +13,9 @@ automation:
     alias: Dishwasher started notification
     description: Notify labelled push targets when the monitored dishwasher start is confirmed.
     triggers:
-      # Running turns on immediately for a candidate start. Last started changes
-      # only when >30 W confirms the cycle, while retaining the retrospective time.
+      # Running and Cycle phase react immediately to a candidate start. Last
+      # started changes only when >30 W confirms the cycle, while retaining the
+      # retrospective timestamp from the original candidate.
       - trigger: state
         entity_id: sensor.dishwasher_last_started
     conditions:
@@ -43,8 +43,8 @@ automation:
     description: Notify labelled push targets when the monitored dishwasher finishes.
     triggers:
       - trigger: state
-        entity_id: sensor.dishwasher_phase
-        from: "Running"
+        entity_id: sensor.dishwasher_cycle_phase
+        from: "Finish pending"
         to: "Finished"
     actions:
       - action: notify.send_message
