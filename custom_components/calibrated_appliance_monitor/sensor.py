@@ -20,12 +20,7 @@ async def async_setup_entry(
     """Expose public appliance facts plus algorithm-specific diagnostics."""
     monitor = entry.runtime_data
 
-    entities: list[SensorEntity] = [
-        CyclePhaseSensor(monitor),
-        LastStartedSensor(monitor),
-        LastFinishedSensor(monitor),
-        LastCycleEnergySensor(monitor),
-    ]
+    entities: list[SensorEntity] = [CyclePhaseSensor(monitor)]
 
     # Diagnostics describe the implementation of this specific calibration, so
     # they deliberately do not become part of the common ApplianceMonitor base.
@@ -60,7 +55,7 @@ class ApplianceSensor(SensorEntity):
 
 
 class CyclePhaseSensor(ApplianceSensor):
-    """Public lifecycle phase chosen by the selected appliance algorithm."""
+    """Public lifecycle phase and metadata for the most recent cycle."""
 
     _attr_name = "Cycle phase"
 
@@ -73,53 +68,15 @@ class CyclePhaseSensor(ApplianceSensor):
     def native_value(self) -> str:
         return self.monitor.cycle_phase
 
-
-class LastStartedSensor(ApplianceSensor):
-    """Confirmed start time of the most recent cycle."""
-
-    _attr_name = "Last started"
-    _attr_device_class = SensorDeviceClass.TIMESTAMP
-
-    def __init__(self, monitor: ApplianceMonitor) -> None:
-        super().__init__(monitor)
-        self._attr_unique_id = monitor.unique_id("last_started")
-
     @property
-    def native_value(self) -> datetime | None:
-        value = getattr(self.monitor, "last_started_at", None)
-        return datetime.fromisoformat(value) if value else None
-
-
-class LastFinishedSensor(ApplianceSensor):
-    """Confirmed finish time of the most recent cycle."""
-
-    _attr_name = "Last finished"
-    _attr_device_class = SensorDeviceClass.TIMESTAMP
-
-    def __init__(self, monitor: ApplianceMonitor) -> None:
-        super().__init__(monitor)
-        self._attr_unique_id = monitor.unique_id("last_finished")
-
-    @property
-    def native_value(self) -> datetime | None:
-        value = getattr(self.monitor, "last_finished_at", None)
-        return datetime.fromisoformat(value) if value else None
-
-
-class LastCycleEnergySensor(ApplianceSensor):
-    """Energy consumed by the most recently completed cycle."""
-
-    _attr_name = "Last cycle energy"
-    _attr_device_class = SensorDeviceClass.ENERGY
-    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
-
-    def __init__(self, monitor: ApplianceMonitor) -> None:
-        super().__init__(monitor)
-        self._attr_unique_id = monitor.unique_id("last_cycle_energy")
-
-    @property
-    def native_value(self) -> float | None:
-        return getattr(self.monitor, "last_cycle_energy_kwh", None)
+    def extra_state_attributes(self) -> dict[str, str | float | None]:
+        return {
+            "last_started": getattr(self.monitor, "last_started_at", None),
+            "last_finished": getattr(self.monitor, "last_finished_at", None),
+            "last_cycle_energy_kwh": getattr(
+                self.monitor, "last_cycle_energy_kwh", None
+            ),
+        }
 
 
 class DishwasherDiagnosticSensor(ApplianceSensor):
