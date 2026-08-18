@@ -27,7 +27,7 @@ class ApplianceMonitor:
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         self.hass = hass
         self.entry = entry
-        self.source_device_id: str = entry.options[CONF_SOURCE_DEVICE]
+        self.source_device_id: str = entry.data[CONF_SOURCE_DEVICE]
         self.listeners: list[Callable[[], None]] = []
 
     @property

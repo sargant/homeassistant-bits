@@ -20,13 +20,12 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: CalibratedApplianceMonitorConfigEntry
 ) -> bool:
     """Set up one monitored appliance."""
-    algorithm_id = entry.options.get(CONF_ALGORITHM)
-    source_device_id = entry.options.get(CONF_SOURCE_DEVICE)
+    algorithm_id = entry.data.get(CONF_ALGORITHM)
+    source_device_id = entry.data.get(CONF_SOURCE_DEVICE)
 
-    # Adding the integration creates an empty entry by design. The appliance is
-    # created only after Configure has supplied a source device and algorithm.
     if not algorithm_id or not source_device_id:
-        return True
+        _LOGGER.error("Calibrated appliance entry is missing its appliance identity")
+        return False
 
     if algorithm_id not in ALGORITHMS:
         _LOGGER.error("Unknown calibrated appliance algorithm: %s", algorithm_id)
@@ -44,8 +43,6 @@ async def async_unload_entry(
     hass: HomeAssistant, entry: CalibratedApplianceMonitorConfigEntry
 ) -> bool:
     """Unload one monitored appliance."""
-    # The first Configure action reloads an entry that was previously loaded
-    # without runtime data or entity platforms, so there may be nothing to unload.
     if not hasattr(entry, "runtime_data"):
         return True
 

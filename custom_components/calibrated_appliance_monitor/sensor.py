@@ -70,13 +70,18 @@ class CyclePhaseSensor(ApplianceSensor):
 
     @property
     def extra_state_attributes(self) -> dict[str, str | float | None]:
-        return {
+        attributes: dict[str, str | float | None] = {
             "last_started": getattr(self.monitor, "last_started_at", None),
             "last_finished": getattr(self.monitor, "last_finished_at", None),
             "last_cycle_energy_kwh": getattr(
                 self.monitor, "last_cycle_energy_kwh", None
             ),
         }
+        if hasattr(self.monitor, "last_cycle_outcome"):
+            attributes["last_cycle_outcome"] = getattr(
+                self.monitor, "last_cycle_outcome", None
+            )
+        return attributes
 
 
 class DishwasherDiagnosticSensor(ApplianceSensor):

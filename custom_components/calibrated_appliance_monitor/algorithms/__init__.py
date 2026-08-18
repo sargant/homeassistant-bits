@@ -4,10 +4,12 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
 from .base import ApplianceMonitor
+from .hoover_hbdos695tamce80 import HooverHBDOS695TAMCE80Monitor
 from .indesit_d2ihl326uk import IndesitD2IHL326UKMonitor
 
 ALGORITHMS: dict[str, type[ApplianceMonitor]] = {
     IndesitD2IHL326UKMonitor.algorithm_id: IndesitD2IHL326UKMonitor,
+    HooverHBDOS695TAMCE80Monitor.algorithm_id: HooverHBDOS695TAMCE80Monitor,
 }
 
 ALGORITHM_OPTIONS = [
