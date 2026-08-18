@@ -154,7 +154,11 @@ class IndesitD2IHL326UKMonitor(ApplianceMonitor):
             elif device_class == SensorDeviceClass.ENERGY:
                 if not self.energy_entity_id:
                     self.energy_entity_id = entity.entity_id
-                if state and state.attributes.get("state_class") == SensorStateClass.TOTAL_INCREASING:
+                if (
+                    state
+                    and state.attributes.get("state_class")
+                    == SensorStateClass.TOTAL_INCREASING
+                ):
                     self.energy_entity_id = entity.entity_id
 
     @staticmethod
@@ -381,6 +385,7 @@ class IndesitD2IHL326UKMonitor(ApplianceMonitor):
         # by one minute so the public timestamps report the real boundary.
         finished = dt_util.now() - timedelta(seconds=FINISH_CONFIRM)
         self.last_finished_at = finished.isoformat()
+        self.last_cycle_energy_kwh = None
         if (
             (energy := self._energy()) is not None
             and self.last_started_energy_kwh is not None
