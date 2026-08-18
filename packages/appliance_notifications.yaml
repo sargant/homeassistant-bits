@@ -1,0 +1,57 @@
+# Appliance notifications
+#
+# Household-specific notification policy for appliance monitors. Detection stays
+# in the appliance integration; this package decides when and how to notify.
+#
+# Notifications deliberately consume only the public appliance surface.
+#
+# The electricity unit-rate entity remains installation-specific because it is
+# used only to format the finished notification, not to detect the cycle.
+
+automation:
+  - id: dishwasher_started_notification
+    alias: Dishwasher started notification
+    description: Notify labelled push targets when the monitored dishwasher start is confirmed.
+    triggers:
+      - trigger: state
+        entity_id: sensor.kitchen_dishwasher_cycle_phase
+        from: "Starting"
+        to: "Running"
+    actions:
+      - action: notify.send_message
+        target:
+          label_id: "{{ label_id('Receive push notifications') }}"
+        data:
+          title: 🍽️ Dishwasher started
+          message: >-
+            Started at {{
+              as_timestamp(states('sensor.kitchen_dishwasher_last_started'))
+              | timestamp_custom('%H:%M')
+            }}
+
+  - id: dishwasher_finished_notification
+    alias: Dishwasher finished notification
+    description: Notify labelled push targets when the monitored dishwasher finishes.
+    triggers:
+      - trigger: state
+        entity_id: sensor.kitchen_dishwasher_cycle_phase
+        from: "Finish pending"
+        to: "Finished"
+    actions:
+      - action: notify.send_message
+        target:
+          label_id: "{{ label_id('Receive push notifications') }}"
+        data:
+          title: 🍽️ Dishwasher finished
+          message: >-
+            {% set started = as_timestamp(states('sensor.kitchen_dishwasher_last_started')) %}
+            {% set finished = as_timestamp(states('sensor.kitchen_dishwasher_last_finished')) %}
+            {% set duration_s = ((finished - started) if started is not none and finished is not none else 0) | int(0) %}
+            {% set total_minutes = duration_s // 60 %}
+            {% set hours = total_minutes // 60 %}
+            {% set minutes = total_minutes % 60 %}
+            {% set duration = (hours ~ 'h' if hours > 0 else '') ~ minutes ~ 'm' %}
+            {% set energy = states('sensor.kitchen_dishwasher_last_cycle_energy') | float(0) %}
+            {% set rate = states('sensor.octopus_energy_electricity_15p0128357_1640000213346_current_rate') %}
+            {% set cost = energy * (rate | float(0)) if is_number(rate) else none %}
+            {{ duration }} • {{ '%.2f' | format(energy) }}kWh • {{ ('£%.2f' | format(cost)) if cost is not none else 'cost unavailable' }}
