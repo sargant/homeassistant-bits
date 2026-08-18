@@ -32,8 +32,8 @@ populated only once >30 W confirms the cycle and retains the retrospective
 candidate timestamp.
 
 Algorithm bookkeeping is exposed separately as disabled-by-default diagnostic
-entities. For the dishwasher these currently include **Candidate started**,
-**Candidate start energy**, and **Cycle start energy**. They are useful while
+entities. For the dishwasher these currently include **Start time candidate**,
+**Starting energy candidate**, and **Cycle start energy**. They are useful while
 calibrating or debugging the detector but are not required for normal
 automations or notifications.
 
