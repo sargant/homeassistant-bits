@@ -20,7 +20,7 @@ class ApplianceMonitor:
     model: ClassVar[str]
     icon: ClassVar[str] = "mdi:power-plug"
 
-    cycle_phase: str
+    state: str
     running: bool
     available: bool
     attributes: dict[str, Any]
@@ -30,6 +30,11 @@ class ApplianceMonitor:
         self.entry = entry
         self.source_device_id: str = entry.options[CONF_SOURCE_DEVICE]
         self.listeners: list[Callable[[], None]] = []
+
+    @property
+    def cycle_phase(self) -> str:
+        """Return the algorithm-defined public lifecycle phase."""
+        return self.state
 
     @property
     def device_info(self) -> DeviceInfo:
