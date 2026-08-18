@@ -6,5 +6,5 @@
   "documentation": "https://github.com/sargant/homeassistant-bits",
   "integration_type": "device",
   "iot_class": "calculated",
-  "version": "0.1.0"
+  "version": "0.2.0"
 }
