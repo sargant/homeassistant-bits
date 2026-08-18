@@ -1,10 +1,10 @@
 {
   "title": "Calibrated Appliance Monitor",
-  "options": {
+  "config": {
     "step": {
-      "init": {
+      "user": {
         "title": "Appliance configuration",
-        "description": "Choose the smart plug and calibrated appliance algorithm.",
+        "description": "Choose the smart plug and calibrated appliance algorithm. These define the appliance monitor and cannot be changed after setup.",
         "data": {
           "source_device": "Smart plug",
           "algorithm": "Algorithm"
