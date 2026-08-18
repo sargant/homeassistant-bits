@@ -67,7 +67,9 @@ class CyclePhaseSensor(ApplianceSensor):
     def __init__(self, monitor: ApplianceMonitor) -> None:
         super().__init__(monitor)
         self._attr_icon = monitor.icon
-        self._attr_unique_id = monitor.unique_id("cycle_phase")
+        # This is the same lifecycle entity previously called Cycle state. Keep
+        # its unique ID stable so existing installations upgrade it in place.
+        self._attr_unique_id = monitor.unique_id("cycle_state")
 
     @property
     def native_value(self) -> str:
