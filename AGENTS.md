@@ -2,11 +2,13 @@
 
 ## Project purpose
 
-This repository is a personal collection of Home Assistant YAML.
+This repository is a personal collection of Home Assistant configuration and
+experiments, mostly YAML.
 
 It may contain appliance monitoring, automations, scripts, template entities,
 notifications, lighting experiments, and other miscellaneous Home Assistant
-configuration.
+configuration. Small custom integrations or other code are also appropriate
+when explicitly requested.
 
 There is no requirement for the contents to form a coherent application or
 shared framework.
