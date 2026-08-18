@@ -25,7 +25,7 @@ automation:
           title: 🍽️ Dishwasher started
           message: >-
             Started at {{
-              as_timestamp(states('sensor.kitchen_dishwasher_last_started'))
+              as_timestamp(state_attr('sensor.kitchen_dishwasher_cycle_phase', 'last_started'))
               | timestamp_custom('%H:%M')
             }}
 
@@ -44,14 +44,14 @@ automation:
         data:
           title: 🍽️ Dishwasher finished
           message: >-
-            {% set started = as_timestamp(states('sensor.kitchen_dishwasher_last_started')) %}
-            {% set finished = as_timestamp(states('sensor.kitchen_dishwasher_last_finished')) %}
+            {% set started = as_timestamp(state_attr('sensor.kitchen_dishwasher_cycle_phase', 'last_started')) %}
+            {% set finished = as_timestamp(state_attr('sensor.kitchen_dishwasher_cycle_phase', 'last_finished')) %}
             {% set duration_s = ((finished - started) if started is not none and finished is not none else 0) | int(0) %}
             {% set total_minutes = duration_s // 60 %}
             {% set hours = total_minutes // 60 %}
             {% set minutes = total_minutes % 60 %}
             {% set duration = (hours ~ 'h' if hours > 0 else '') ~ minutes ~ 'm' %}
-            {% set energy = states('sensor.kitchen_dishwasher_last_cycle_energy') | float(0) %}
+            {% set energy = state_attr('sensor.kitchen_dishwasher_cycle_phase', 'last_cycle_energy_kwh') | float(0) %}
             {% set rate = states('sensor.octopus_energy_electricity_15p0128357_1640000213346_current_rate') %}
             {% set cost = energy * (rate | float(0)) if is_number(rate) else none %}
             {{ duration }} • {{ '%.2f' | format(energy) }}kWh • {{ ('£%.2f' | format(cost)) if cost is not none else 'cost unavailable' }}
