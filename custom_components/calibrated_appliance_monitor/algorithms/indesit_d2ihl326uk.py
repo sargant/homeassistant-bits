@@ -7,12 +7,19 @@ from typing import ClassVar
 
 from homeassistant.components.sensor import SensorDeviceClass
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import EntityStateAttribute, Platform, STATE_UNAVAILABLE, STATE_UNKNOWN
+from homeassistant.const import (
+    EntityStateAttribute,
+    Platform,
+    STATE_UNAVAILABLE,
+    STATE_UNKNOWN,
+    UnitOfEnergy,
+)
 from homeassistant.core import CALLBACK_TYPE, Event, EventStateChangedData, HomeAssistant, State, callback
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.event import async_call_later, async_track_state_change_event
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
+from homeassistant.util.unit_conversion import EnergyConverter
 
 from ..const import DOMAIN
 from .base import ApplianceMonitor
@@ -148,13 +155,28 @@ class IndesitD2IHL326UKMonitor(ApplianceMonitor):
             return None
 
     def _energy(self) -> float | None:
-        return self._number(self.hass.states.get(self.energy_entity_id)) if self.energy_entity_id else None
+        if not self.energy_entity_id:
+            return None
+        state = self.hass.states.get(self.energy_entity_id)
+        value = self._number(state)
+        if state is None or value is None:
+            return None
+        unit = state.attributes.get(EntityStateAttribute.UNIT_OF_MEASUREMENT)
+        if unit not in EnergyConverter.VALID_UNITS:
+            _LOGGER.warning(
+                "Dishwasher energy sensor %s has unsupported unit %s",
+                self.energy_entity_id,
+                unit,
+            )
+            return None
+        return EnergyConverter.convert(value, unit, UnitOfEnergy.KILO_WATT_HOUR)
 
     @callback
     def _power_changed(self, event: Event[EventStateChangedData]) -> None:
         old = self._number(event.data["old_state"])
         new = self._number(event.data["new_state"])
         was_available = self.available
+        self.power = new
         self.available = new is not None
         if new is None:
             if was_available:
@@ -163,8 +185,8 @@ class IndesitD2IHL326UKMonitor(ApplianceMonitor):
         if not was_available:
             self._changed()
 
-        self.power = new
         if old is None:
+            self._power_restored(new)
             return
 
         now = dt_util.now()
@@ -213,6 +235,51 @@ class IndesitD2IHL326UKMonitor(ApplianceMonitor):
                 self._cancel("end")
                 self._cancel("finish")
                 self._set_state(RUNNING)
+
+    def _power_restored(self, power: float) -> None:
+        """Reconcile detector state with the first reading after an outage."""
+        now = dt_util.now()
+
+        if self.state == IDLE and power > START_W:
+            # We cannot recover the hidden start time, but we can still detect
+            # the cycle from the first usable reading rather than missing it.
+            self.candidate_started_at = now.isoformat()
+            self.candidate_start_energy_kwh = self._energy()
+            self._set_state(STARTING)
+            self._schedule("start", START_CONFIRM, self._start_timeout)
+            if power > ACTIVE_W:
+                self.last_started_at = self.candidate_started_at
+                self.last_started_energy_kwh = self.candidate_start_energy_kwh
+                self._cancel("start")
+                self._set_state(RUNNING)
+        elif self.state == STARTING:
+            if power > ACTIVE_W and "start" in self.timers:
+                self.last_started_at = self.candidate_started_at
+                self.last_started_energy_kwh = self.candidate_start_energy_kwh
+                self._cancel("start")
+                self._set_state(RUNNING)
+            elif power < ASLEEP_W and "asleep" not in self.timers:
+                self._schedule("asleep", ASLEEP_CONFIRM, self._asleep_timeout, persist=False)
+        elif self.state == RUNNING and power < ACTIVE_W and "end" not in self.timers:
+            # Time spent unavailable is not evidence of continuous low power,
+            # so restart the full conservative end window from this reading.
+            self._schedule("end", END_WINDOW, self._end_timeout)
+        elif self.state == ENDING:
+            if power > ACTIVE_W:
+                self._set_state(RUNNING)
+            elif START_W < power < ACTIVE_W:
+                self._set_state(FINISH_PENDING)
+        elif self.state == FINISH_PENDING:
+            if power > ACTIVE_W:
+                self._cancel("end")
+                self._cancel("finish")
+                self._set_state(RUNNING)
+            elif power > START_W:
+                self._cancel("finish")
+            elif power < START_W and "finish" not in self.timers:
+                self._schedule("finish", FINISH_CONFIRM, self._finish_timeout)
+        elif self.state == FINISHED and power < ASLEEP_W and "asleep" not in self.timers:
+            self._schedule("asleep", ASLEEP_CONFIRM, self._asleep_timeout, persist=False)
 
     def _startup(self, power: float) -> None:
         """Reconcile persisted detector state with live power after a restart."""
