@@ -53,7 +53,7 @@ START_WINDOW = 3 * 60
 DRY_MIN_W = 700.0
 DRY_MAX_W = 1300.0
 DRY_CONFIRM = 10
-WET_FINISH_CONFIRM = 45
+WET_FINISH_CONFIRM = 60
 DRY_FINISH_CONFIRM = 10
 DRY_ONLY_BOUNDARY = 2 * 60
 FINISHED_MIN = 60
@@ -69,7 +69,7 @@ class HooverHBDOS695TAMCE80Monitor(ApplianceMonitor):
     candidate start, and later >30 W activity confirms it while retaining the
     original candidate timestamp. Drying is latched after ten continuous seconds
     in the distinctive 700..1300 W dryer band. Completion is confirmed after
-    continuous <10 W quiet: 45 seconds while washing and 10 seconds once drying
+    continuous <10 W quiet: 60 seconds while washing and 10 seconds once drying
     has been seen. The official finish is backdated to the first quiet sample.
     Finished remains visible for at least one minute and at most ten.
     """
