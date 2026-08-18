@@ -287,7 +287,7 @@ class IndesitD2IHL326UKMonitor(ApplianceMonitor):
         elif self.state == ENDING:
             if power > ACTIVE_W:
                 self._set_state(RUNNING)
-            elif power > START_W:
+            elif START_W < power < ACTIVE_W:
                 self._set_state(FINISH_PENDING)
         elif self.state == FINISH_PENDING:
             if power > ACTIVE_W:
