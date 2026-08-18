@@ -384,6 +384,8 @@ class IndesitD2IHL326UKMonitor(ApplianceMonitor):
             self.last_cycle_energy_kwh = round(energy - self.last_started_energy_kwh, 3)
 
         self._set_state(FINISHED)
+        if self.power < ASLEEP_W and "asleep" not in self.timers:
+            self._schedule("asleep", ASLEEP_CONFIRM, self._asleep_timeout, persist=False)
 
     @callback
     def _asleep_timeout(self, _now: datetime) -> None:
