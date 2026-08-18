@@ -465,9 +465,9 @@ class HooverHBDOS695TAMCE80Monitor(ApplianceMonitor):
             return
 
         self.last_finished_at = self.finish_candidate_at
-        finish_energy = self.finish_candidate_energy_kwh
+        finish_energy = self._energy()
         if finish_energy is None:
-            finish_energy = self._energy()
+            finish_energy = self.finish_candidate_energy_kwh
 
         self.last_cycle_energy_kwh = None
         if (
