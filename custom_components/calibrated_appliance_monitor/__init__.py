@@ -16,26 +16,6 @@ PLATFORMS = [Platform.SENSOR, Platform.BINARY_SENSOR]
 type CalibratedApplianceMonitorConfigEntry = ConfigEntry[ApplianceMonitor]
 
 
-async def async_migrate_entry(
-    hass: HomeAssistant, entry: CalibratedApplianceMonitorConfigEntry
-) -> bool:
-    """Move appliance identity from mutable options into config-entry data."""
-    if entry.version == 1:
-        data = dict(entry.data)
-        for key in (CONF_SOURCE_DEVICE, CONF_ALGORITHM):
-            if key not in data and key in entry.options:
-                data[key] = entry.options[key]
-
-        hass.config_entries.async_update_entry(
-            entry,
-            data=data,
-            options={},
-            version=2,
-        )
-
-    return True
-
-
 async def async_setup_entry(
     hass: HomeAssistant, entry: CalibratedApplianceMonitorConfigEntry
 ) -> bool:
