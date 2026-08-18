@@ -3,7 +3,7 @@
 from collections.abc import Callable
 from datetime import datetime, timedelta
 import logging
-from typing import Any, ClassVar
+from typing import ClassVar
 
 from homeassistant.components.sensor import SensorDeviceClass
 from homeassistant.config_entries import ConfigEntry
@@ -27,7 +27,6 @@ RUNNING = "Running"
 ENDING = "Ending"
 FINISH_PENDING = "Finish pending"
 FINISHED = "Finished"
-RUNNING_STATES = {STARTING, RUNNING, ENDING, FINISH_PENDING}
 
 # Calibrated from recorded cycles for this specific dishwasher.
 START_W = 5.0
@@ -70,7 +69,6 @@ class IndesitD2IHL326UKMonitor(ApplianceMonitor):
         self.last_started_at: str | None = None
         self.last_started_energy_kwh: float | None = None
         self.last_finished_at: str | None = None
-        self.last_duration_s: int | None = None
         self.last_cycle_energy_kwh: float | None = None
         self.deadlines: dict[str, str] = {}
 
@@ -84,27 +82,9 @@ class IndesitD2IHL326UKMonitor(ApplianceMonitor):
 
     @property
     def running(self) -> bool:
-        # Match the original YAML helper semantics: a candidate start is useful
-        # immediately even though its official timestamp is confirmed later.
-        return self.state in RUNNING_STATES
-
-    @property
-    def phase(self) -> str:
-        # Public phase is responsive from the first plausible sign of a cycle;
-        # the detailed Starting/Ending/Finish pending lifecycle stays diagnostic.
-        return self.state if self.state in (IDLE, FINISHED) else RUNNING
-
-    @property
-    def attributes(self) -> dict[str, Any]:
-        return {
-            "candidate_started_at": self.candidate_started_at,
-            "candidate_start_energy_kwh": self.candidate_start_energy_kwh,
-            "last_started_at": self.last_started_at,
-            "last_started_energy_kwh": self.last_started_energy_kwh,
-            "last_finished_at": self.last_finished_at,
-            "last_duration_s": self.last_duration_s,
-            "last_cycle_energy_kwh": self.last_cycle_energy_kwh,
-        }
+        # Starting is immediately useful publicly even though the official
+        # retrospective start timestamp is only promoted after confirmation.
+        return self.state not in (IDLE, FINISHED)
 
     async def async_setup(self) -> None:
         """Restore state and listen to the selected smart plug."""
@@ -116,7 +96,6 @@ class IndesitD2IHL326UKMonitor(ApplianceMonitor):
                 "last_started_at",
                 "last_started_energy_kwh",
                 "last_finished_at",
-                "last_duration_s",
                 "last_cycle_energy_kwh",
                 "deadlines",
             ):
@@ -334,12 +313,9 @@ class IndesitD2IHL326UKMonitor(ApplianceMonitor):
             return
 
         # The confirmation delay is not part of the cycle. Backdate the finish
-        # by one minute so duration and notifications report the real boundary.
+        # by one minute so the public timestamps report the real boundary.
         finished = dt_util.now() - timedelta(seconds=FINISH_CONFIRM)
         self.last_finished_at = finished.isoformat()
-        if self.last_started_at:
-            started = datetime.fromisoformat(self.last_started_at)
-            self.last_duration_s = round((finished - started).total_seconds())
         if (energy := self._energy()) is not None and self.last_started_energy_kwh is not None:
             self.last_cycle_energy_kwh = round(energy - self.last_started_energy_kwh, 3)
 
@@ -366,7 +342,6 @@ class IndesitD2IHL326UKMonitor(ApplianceMonitor):
             "last_started_at": self.last_started_at,
             "last_started_energy_kwh": self.last_started_energy_kwh,
             "last_finished_at": self.last_finished_at,
-            "last_duration_s": self.last_duration_s,
             "last_cycle_energy_kwh": self.last_cycle_energy_kwh,
             "deadlines": self.deadlines,
         }
