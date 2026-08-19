@@ -1,7 +1,8 @@
 # Calibrated Appliance Monitor
 
 Home Assistant integration for appliance-specific cycle detection from smart-plug
-power and energy data.
+power and energy data, with algorithms derived by ChatGPT from recorded appliance
+traces.
 
 Current calibrations:
 
@@ -32,7 +33,7 @@ Washer-dryer phases: `Idle`, `Washing`, `Drying`, `Finished`.
 
 **Cycle phase** also carries `last_started`, `last_finished`, and
 `last_cycle_energy_kwh`. Washer-dryer entries additionally expose
-`last_cycle_outcome`: `Washing`, `Drying only`, or `Washing + drying`.
+`last_cycle_outcome`: `Washing`, `Drying`, or `Washing + drying`.
 
 ## Diagnostics
 
