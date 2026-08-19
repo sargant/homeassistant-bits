@@ -1,70 +1,57 @@
 # Calibrated Appliance Monitor
 
-A deliberately small custom integration for appliance-specific power-profile
-detection. Version 0.2 contains calibrations for the Indesit D2IHL326UK
-dishwasher and Hoover HBDOS695TAMCE-80 washer-dryer.
+Home Assistant integration for appliance-specific cycle detection from smart-plug
+power and energy data, with algorithms derived by ChatGPT from recorded appliance
+traces.
 
-Each monitored appliance is a separate config entry and owns its own virtual
-Home Assistant device. Appliance-specific thresholds and state machines live in
-`algorithms/`; the integration lifecycle and entity platforms stay generic.
+Current calibrations:
+
+- Indesit D2IHL326UK dishwasher
+- Hoover HBDOS695TAMCE-80 washer-dryer
 
 ## Setup
 
 1. Copy this directory to `/config/custom_components/calibrated_appliance_monitor`.
 2. Restart Home Assistant.
 3. Add **Calibrated Appliance Monitor** from **Settings → Devices & services**.
-4. In **Appliance configuration**, select:
-   - the smart plug measuring the appliance;
-   - the calibrated appliance algorithm.
+4. Select the smart plug and appliance calibration.
 
-The smart plug and algorithm define the appliance monitor and are stored as
-configuration rather than mutable options. To monitor a different appliance or
-source, remove the entry and add a new one.
+Power and cumulative-energy sensors are discovered from the selected smart-plug
+device. To change the plug or calibration, remove the entry and add it again.
 
-After setup, the entry is named for the selected appliance model and the
-integration creates its logical appliance device. Power and cumulative-energy
-sensors are discovered automatically from the selected smart-plug device.
+## Entities
 
-The public surface is deliberately small: **Cycle phase** and **Running**. Cycle
-phase exposes only meaningful appliance lifecycle states; Running is the simpler
-yes/no view for consumers that do not care about the detailed phase.
+Every monitor exposes:
 
-For the dishwasher, cycle phase is `Idle`, `Starting`, `Running`, `Ending`,
-`Finish pending`, and `Finished`.
+- **Cycle phase**
+- **Running**
 
-For the washer-dryer, uncertainty is deliberately kept internal and cycle phase
-is only `Idle`, `Washing`, `Drying`, and `Finished`. A hidden >10 W start
-candidate is confirmed by >30 W activity within a three-minute window. Drying is
-latched after 10 seconds in the calibrated 700–1300 W dryer band. Finish is
-backdated to the first <10 W sample after 60 seconds of quiet while washing, or
-10 seconds once drying has been seen. `Finished` remains visible for at least 60
-seconds; after that it returns to `Idle` below 1 W, with a hard maximum of 10
-minutes.
+Dishwasher phases: `Idle`, `Starting`, `Running`, `Ending`, `Finish pending`,
+`Finished`.
 
-Cycle metadata is carried as attributes on **Cycle phase** rather than separate
-entities: `last_started`, `last_finished`, and `last_cycle_energy_kwh`.
-Washer-dryer entries also expose `last_cycle_outcome`, classified as `Washing`,
-`Drying only`, or `Washing + drying`. The drying-only boundary is currently two
-minutes from the retrospective cycle start and is intentionally easy to
-recalibrate in the algorithm module.
+Washer-dryer phases: `Idle`, `Washing`, `Drying`, `Finished`.
 
-For the dishwasher, `last_started` is populated only once >30 W confirms the
-cycle and retains the retrospective candidate timestamp. The energy value is the
-consumption derived for the most recently completed cycle; the source smart plug
-remains the proper place for overall energy history.
+**Cycle phase** also carries `last_started`, `last_finished`, and
+`last_cycle_energy_kwh`. Washer-dryer entries additionally expose
+`last_cycle_outcome`: `Washing`, `Drying`, or `Washing + drying`.
 
-Algorithm bookkeeping is exposed separately as diagnostic entities. For the
-dishwasher these currently include **Start time candidate**, **Starting energy
-candidate**, and **Cycle start energy**. The washer-dryer exposes those same
-three diagnostics plus **Drying time candidate**, **Drying started**, and
-**Finish time candidate**. Candidate diagnostics show the live internal debounce
-windows while the public cycle phase remains stable. They are enabled and visible
-by default so retrospective detector decisions remain easy to inspect while
-being clearly classified as diagnostics rather than public appliance state.
+## Diagnostics
 
-Thresholds and state machines are intentionally fixed in each algorithm module
-rather than exposed as tuning options.
+Both calibrations expose:
 
-The integration only publishes appliance state and cycle facts. Notifications,
-recipient selection, electricity pricing and message formatting belong in normal
-Home Assistant automations outside the integration.
+- **Cycle start candidate**
+- **Cycle start energy candidate**
+- **Cycle start energy**
+
+The washer-dryer also exposes:
+
+- **Drying start candidate** — hidden by default
+- **Drying start time**
+- **Cycle finish candidate** — hidden by default
+
+Hidden diagnostics remain enabled and recorded. Visibility defaults only affect
+newly created registry entries.
+
+Thresholds and state machines live in `algorithms/` and are intentionally fixed
+per appliance. Notifications and pricing stay in normal Home Assistant
+automations.

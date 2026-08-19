@@ -42,7 +42,7 @@ DRY = "Drying"
 FINISHED = "Finished"
 
 OUTCOME_WET = "Washing"
-OUTCOME_DRY_ONLY = "Drying only"
+OUTCOME_DRY_ONLY = "Drying"
 OUTCOME_WET_DRY = "Washing + drying"
 
 # Calibrated from recorded cycles for this specific washer-dryer.
