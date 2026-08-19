@@ -56,17 +56,13 @@ ASLEEP_CONFIRM = 60
 class IndesitD2IHL326UKMonitor(ApplianceMonitor):
     """Power-profile detector calibrated for the Indesit D2IHL326UK.
 
-    Public lifecycle: Idle -> Running -> Finished -> Idle.
-
-    Internally the detector still uses:
-    Idle -> Starting -> Running -> Ending -> Finish pending -> Finished -> Idle.
+    Lifecycle: Idle -> Running -> Finished -> Idle.
 
     A >5 W rise creates a candidate start. Reaching >30 W within six minutes
     confirms it and backdates the real start to that candidate time. During a
     confirmed cycle, 15 continuous minutes below 30 W arms the end sequence.
     After the final activity, one minute below 5 W confirms completion, and one
-    minute below 1 W returns the appliance from Finished to Idle. The candidate
-    and end-sequence states are bookkeeping only and are not exposed publicly.
+    minute below 1 W returns the appliance from Finished to Idle.
     """
 
     algorithm_id: ClassVar[str] = ALGORITHM_ID
@@ -81,7 +77,7 @@ class IndesitD2IHL326UKMonitor(ApplianceMonitor):
         self.store = Store(hass, 1, f"{DOMAIN}.{entry.entry_id}")
 
         # Persist the facts needed to survive a restart or calculate the
-        # completed cycle; the public entities are only views over this state.
+        # completed cycle.
         self.state = IDLE
         self.candidate_started_at: str | None = None
         self.candidate_start_energy_kwh: float | None = None
@@ -101,7 +97,7 @@ class IndesitD2IHL326UKMonitor(ApplianceMonitor):
 
     @property
     def cycle_phase(self) -> str:
-        """Expose only stable lifecycle phases; debounce states stay internal."""
+        """Return the dishwasher lifecycle phase."""
         if self.state == FINISHED:
             return FINISHED
         if self.state in (RUNNING, ENDING, FINISH_PENDING):
@@ -110,8 +106,6 @@ class IndesitD2IHL326UKMonitor(ApplianceMonitor):
 
     @property
     def running(self) -> bool:
-        # Keep the binary Running entity aligned with the simplified public
-        # lifecycle: a start candidate does not count until >30 W confirms it.
         return self.cycle_phase == RUNNING
 
     async def async_setup(self) -> None:
