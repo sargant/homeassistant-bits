@@ -56,13 +56,17 @@ ASLEEP_CONFIRM = 60
 class IndesitD2IHL326UKMonitor(ApplianceMonitor):
     """Power-profile detector calibrated for the Indesit D2IHL326UK.
 
-    Idle -> Starting -> Running -> Ending -> Finish pending -> Finished -> Idle
+    Public lifecycle: Idle -> Running -> Finished -> Idle.
+
+    Internally the detector still uses:
+    Idle -> Starting -> Running -> Ending -> Finish pending -> Finished -> Idle.
 
     A >5 W rise creates a candidate start. Reaching >30 W within six minutes
     confirms it and backdates the real start to that candidate time. During a
     confirmed cycle, 15 continuous minutes below 30 W arms the end sequence.
     After the final activity, one minute below 5 W confirms completion, and one
-    minute below 1 W returns the appliance from Finished to Idle.
+    minute below 1 W returns the appliance from Finished to Idle. The candidate
+    and end-sequence states are bookkeeping only and are not exposed publicly.
     """
 
     algorithm_id: ClassVar[str] = ALGORITHM_ID
@@ -96,10 +100,19 @@ class IndesitD2IHL326UKMonitor(ApplianceMonitor):
         self.unsub_power: CALLBACK_TYPE | None = None
 
     @property
+    def cycle_phase(self) -> str:
+        """Expose only stable lifecycle phases; debounce states stay internal."""
+        if self.state == FINISHED:
+            return FINISHED
+        if self.state in (RUNNING, ENDING, FINISH_PENDING):
+            return RUNNING
+        return IDLE
+
+    @property
     def running(self) -> bool:
-        # Starting is immediately useful publicly even though the official
-        # retrospective start timestamp is only promoted after confirmation.
-        return self.state not in (IDLE, FINISHED)
+        # Keep the binary Running entity aligned with the simplified public
+        # lifecycle: a start candidate does not count until >30 W confirms it.
+        return self.cycle_phase == RUNNING
 
     async def async_setup(self) -> None:
         """Restore state and listen to the selected smart plug."""
