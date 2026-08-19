@@ -53,14 +53,22 @@ cycle and retains the retrospective candidate timestamp. The energy value is the
 consumption derived for the most recently completed cycle; the source smart plug
 remains the proper place for overall energy history.
 
-Algorithm bookkeeping is exposed separately as diagnostic entities. For the
-dishwasher these currently include **Start time candidate**, **Starting energy
-candidate**, and **Cycle start energy**. The washer-dryer exposes those same
-three diagnostics plus **Drying time candidate**, **Drying started**, and
-**Finish time candidate**. Candidate diagnostics show the live internal debounce
-windows while the public cycle phase remains stable. They are enabled and visible
-by default so retrospective detector decisions remain easy to inspect while
-being clearly classified as diagnostics rather than public appliance state.
+Algorithm bookkeeping is exposed separately as diagnostic entities. Both
+calibrations expose **Cycle start candidate**, **Cycle start energy candidate**,
+and **Cycle start energy**. The washer-dryer additionally exposes **Drying start
+candidate**, **Drying start time**, and **Cycle finish candidate**.
+
+The dishwasher diagnostics are low-noise: its start candidate is created once at
+the beginning of a cycle and the confirmed start-energy value is retained for
+the cycle. They therefore remain visible by default.
+
+For the washer-dryer, **Cycle finish candidate** can appear and disappear many
+times during normal pauses in washing, and **Drying start candidate** is only a
+short debounce window before drying is confirmed. Those two entities remain
+enabled and recorded but start hidden in the entity registry. The other
+washer-dryer diagnostics remain visible by default. This keeps the default device
+view useful without losing the detailed evidence needed for calibration and
+history inspection.
 
 Thresholds and state machines are intentionally fixed in each algorithm module
 rather than exposed as tuning options.
