@@ -105,7 +105,7 @@ class DiagnosticSensor(ApplianceSensor):
 class CandidateStartedSensor(DiagnosticSensor):
     """Earliest plausible start awaiting high-power confirmation."""
 
-    _attr_name = "Start time candidate"
+    _attr_name = "Cycle start candidate"
     _attr_device_class = SensorDeviceClass.TIMESTAMP
 
     def __init__(self, monitor: ApplianceMonitor) -> None:
@@ -121,7 +121,7 @@ class CandidateStartedSensor(DiagnosticSensor):
 class CandidateStartEnergySensor(DiagnosticSensor):
     """Cumulative meter reading captured at the candidate start."""
 
-    _attr_name = "Starting energy candidate"
+    _attr_name = "Cycle start energy candidate"
     _attr_device_class = SensorDeviceClass.ENERGY
     _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
 
@@ -153,8 +153,11 @@ class CycleStartEnergySensor(DiagnosticSensor):
 class DryingCandidateSensor(DiagnosticSensor):
     """First dryer-band sample awaiting drying confirmation."""
 
-    _attr_name = "Drying time candidate"
+    _attr_name = "Drying start candidate"
     _attr_device_class = SensorDeviceClass.TIMESTAMP
+    # This short debounce window is useful in history while calibrating, but it
+    # does not need to clutter the device page during normal use.
+    _attr_entity_registry_visible_default = False
 
     def __init__(self, monitor: ApplianceMonitor) -> None:
         super().__init__(monitor)
@@ -169,7 +172,7 @@ class DryingCandidateSensor(DiagnosticSensor):
 class DryingStartedSensor(DiagnosticSensor):
     """Retrospective start of confirmed tumble drying."""
 
-    _attr_name = "Drying started"
+    _attr_name = "Drying start time"
     _attr_device_class = SensorDeviceClass.TIMESTAMP
 
     def __init__(self, monitor: ApplianceMonitor) -> None:
@@ -185,8 +188,11 @@ class DryingStartedSensor(DiagnosticSensor):
 class FinishCandidateSensor(DiagnosticSensor):
     """First quiet sample awaiting cycle-finish confirmation."""
 
-    _attr_name = "Finish time candidate"
+    _attr_name = "Cycle finish candidate"
     _attr_device_class = SensorDeviceClass.TIMESTAMP
+    # Normal washer behaviour can repeatedly enter and leave the quiet window.
+    # Keep recording it, but hide the resulting chatter from the default UI.
+    _attr_entity_registry_visible_default = False
 
     def __init__(self, monitor: ApplianceMonitor) -> None:
         super().__init__(monitor)
