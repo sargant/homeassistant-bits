@@ -15,7 +15,7 @@ automation:
     triggers:
       - trigger: state
         entity_id: sensor.kitchen_dishwasher_cycle_phase
-        from: "Starting"
+        from: "Idle"
         to: "Running"
     actions:
       - action: notify.send_message
@@ -35,7 +35,7 @@ automation:
     triggers:
       - trigger: state
         entity_id: sensor.kitchen_dishwasher_cycle_phase
-        from: "Finish pending"
+        from: "Running"
         to: "Finished"
     actions:
       - action: notify.send_message

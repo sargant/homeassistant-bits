@@ -26,8 +26,7 @@ Every monitor exposes:
 - **Cycle phase**
 - **Running**
 
-Dishwasher phases: `Idle`, `Starting`, `Running`, `Ending`, `Finish pending`,
-`Finished`.
+Dishwasher phases: `Idle`, `Running`, `Finished`.
 
 Washer-dryer phases: `Idle`, `Washing`, `Drying`, `Finished`.
 

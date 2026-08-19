@@ -56,7 +56,7 @@ ASLEEP_CONFIRM = 60
 class IndesitD2IHL326UKMonitor(ApplianceMonitor):
     """Power-profile detector calibrated for the Indesit D2IHL326UK.
 
-    Idle -> Starting -> Running -> Ending -> Finish pending -> Finished -> Idle
+    Lifecycle: Idle -> Running -> Finished -> Idle.
 
     A >5 W rise creates a candidate start. Reaching >30 W within six minutes
     confirms it and backdates the real start to that candidate time. During a
@@ -77,7 +77,7 @@ class IndesitD2IHL326UKMonitor(ApplianceMonitor):
         self.store = Store(hass, 1, f"{DOMAIN}.{entry.entry_id}")
 
         # Persist the facts needed to survive a restart or calculate the
-        # completed cycle; the public entities are only views over this state.
+        # completed cycle.
         self.state = IDLE
         self.candidate_started_at: str | None = None
         self.candidate_start_energy_kwh: float | None = None
@@ -96,10 +96,17 @@ class IndesitD2IHL326UKMonitor(ApplianceMonitor):
         self.unsub_power: CALLBACK_TYPE | None = None
 
     @property
+    def cycle_phase(self) -> str:
+        """Return the dishwasher lifecycle phase."""
+        if self.state == FINISHED:
+            return FINISHED
+        if self.state in (RUNNING, ENDING, FINISH_PENDING):
+            return RUNNING
+        return IDLE
+
+    @property
     def running(self) -> bool:
-        # Starting is immediately useful publicly even though the official
-        # retrospective start timestamp is only promoted after confirmation.
-        return self.state not in (IDLE, FINISHED)
+        return self.cycle_phase == RUNNING
 
     async def async_setup(self) -> None:
         """Restore state and listen to the selected smart plug."""
