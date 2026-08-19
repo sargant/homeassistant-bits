@@ -26,8 +26,7 @@ Every monitor exposes:
 - **Cycle phase**
 - **Running**
 
-Dishwasher phases: `Idle`, `Running`, `Finished`. Its more detailed start and
-finish debounce states remain internal to the detector.
+Dishwasher phases: `Idle`, `Running`, `Finished`.
 
 Washer-dryer phases: `Idle`, `Washing`, `Drying`, `Finished`.
 
